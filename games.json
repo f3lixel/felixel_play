@@ -1,0 +1,69 @@
+[
+  {
+    "id": "1",
+    "title": "Super Mario Galaxy 2",
+    "platform": "Wii",
+    "romPath": "roms/wii/Super Mario Galaxy 2 (Europe) (En,Fr,De,Es,It).rvz",
+    "coverArt": "assets/covers/super mario galaxy.jpg",
+    "heroArt": "assets/covers/Gemini_Generated_Image_jml6djjml6djjml6.png",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "2",
+    "title": "The Legend of Zelda: Wind Waker HD",
+    "platform": "WiiU",
+    "romPath": "roms/wiiu/WindWakerHD.wud",
+    "coverArt": "assets/covers/wind-waker.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "3",
+    "title": "The Legend of Zelda: Tears of the Kingdom",
+    "platform": "Switch",
+    "romPath": "roms/switch/TOTK.nsp",
+    "coverArt": "assets/covers/totk.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "4",
+    "title": "Mario Kart Wii",
+    "platform": "Wii",
+    "romPath": "roms/wii/MarioKartWii.iso",
+    "coverArt": "assets/covers/mario-kart-wii.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "5",
+    "title": "Super Smash Bros. Ultimate",
+    "platform": "Switch",
+    "romPath": "roms/switch/SmashUltimate.nsp",
+    "coverArt": "assets/covers/smash-ultimate.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "7",
+    "title": "Super Mario Bros. Wonder",
+    "platform": "Switch",
+    "romPath": "roms/switch/Super Mario Bros. Wonder.xci",
+    "coverArt": "assets/covers/4be231db0241349f1f9ad5554e9928f7.jpg",
+    "heroArt": "assets/covers/4be231db0241349f1f9ad5554e9928f7.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "8",
+    "title": "Super Mario Odyssey",
+    "platform": "Switch",
+    "romPath": "roms/switch/_Super Mario Odyssey v1.3.0_.xci",
+    "coverArt": "assets/covers/super mario odyssey titel.jpg",
+    "heroArt": "assets/covers/super mario odyssey hero.png",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "6",
+    "title": "Super Mario 3D World",
+    "platform": "WiiU",
+    "romPath": "roms/wiiu/SM3DWorld.wud",
+    "coverArt": "assets/covers/sm3dworld.jpg",
+    "backgroundMusic": ""
+  }
+]

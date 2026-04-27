@@ -1,0 +1,10 @@
+node_modules/
+emulators/**/*
+!emulators/README.md
+!emulators/dolphin/
+!emulators/ryujinx/
+roms/**/*
+!roms/README.md
+!roms/wii/
+!roms/wiiu/
+!roms/switch/
