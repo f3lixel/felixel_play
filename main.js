@@ -150,6 +150,7 @@ function buildGameLibrary() {
         romPath,
         coverArt: existing?.coverArt || '',
         heroArt: existing?.heroArt || '',
+        heroVideo: existing?.heroVideo || '',
         backgroundMusic: existing?.backgroundMusic || '',
       });
     }

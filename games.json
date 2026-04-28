@@ -47,6 +47,7 @@
     "romPath": "roms/switch/Super Mario Bros. Wonder.xci",
     "coverArt": "assets/covers/4be231db0241349f1f9ad5554e9928f7.jpg",
     "heroArt": "assets/covers/4be231db0241349f1f9ad5554e9928f7.jpg",
+    "heroVideo": "assets/videos/clips/SM Bros Wonder.webm",
     "backgroundMusic": ""
   },
   {
@@ -56,6 +57,7 @@
     "romPath": "roms/switch/_Super Mario Odyssey v1.3.0_.xci",
     "coverArt": "assets/covers/super mario odyssey titel.jpg",
     "heroArt": "assets/covers/super mario odyssey hero.png",
+    "heroVideo": "assets/videos/clips/odyssey_loop.webm",
     "backgroundMusic": ""
   },
   {
