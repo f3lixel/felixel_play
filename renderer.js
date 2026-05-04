@@ -4,6 +4,10 @@ let allGames = [];
 let currentFilter = 'all';
 let currentHeroGame = null;
 let heroToggle = false; // tracks which hero-bg layer is active
+let heroVideoTimer = null;
+let launchTimeline = null;
+
+const HERO_VIDEO_DELAY_MS = 2000;
 
 // ===== INIT =====
 
@@ -11,6 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   createParticles();
   setupNavbarScroll();
   setupFilterButtons();
+  setupLauncherEvents();
 
   try {
     allGames = await window.api.readGames();
@@ -32,7 +37,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ===== HERO =====
 
 function setHeroGame(game, immediate = false) {
-  if (currentHeroGame?.id === game.id) return;
+  if (currentHeroGame?.id === game.id) {
+    if (!immediate && game.heroVideo) {
+      scheduleHeroVideoPreview(game);
+    }
+    return;
+  }
+
+  stopHeroVideoPreview();
   currentHeroGame = game;
 
   const bg1 = document.getElementById('heroBg1');
@@ -62,6 +74,61 @@ function setHeroGame(game, immediate = false) {
   badge.className = `hero-platform-badge badge-${game.platform}`;
 
   playBtn.onclick = () => launchGame(game);
+
+  if (!immediate && game.heroVideo) {
+    scheduleHeroVideoPreview(game);
+  }
+}
+
+function scheduleHeroVideoPreview(game) {
+  cancelHeroVideoTimer();
+  heroVideoTimer = setTimeout(() => {
+    playHeroVideoPreview(game);
+  }, HERO_VIDEO_DELAY_MS);
+}
+
+function cancelHeroVideoTimer() {
+  if (heroVideoTimer) {
+    clearTimeout(heroVideoTimer);
+    heroVideoTimer = null;
+  }
+}
+
+function stopHeroVideoPreview() {
+  cancelHeroVideoTimer();
+
+  const video = document.getElementById('heroVideo');
+  if (!video) return;
+
+  video.classList.remove('visible');
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+}
+
+async function playHeroVideoPreview(game) {
+  if (currentHeroGame?.id !== game.id || !game.heroVideo) return;
+
+  const video = document.getElementById('heroVideo');
+  if (!video) return;
+
+  if (video.getAttribute('src') !== game.heroVideo) {
+    video.src = game.heroVideo;
+    video.load();
+  }
+
+  video.muted = true;
+  video.loop = true;
+  video.playsInline = true;
+
+  try {
+    await video.play();
+    if (currentHeroGame?.id === game.id) {
+      video.classList.add('visible');
+    }
+  } catch {
+    video.classList.remove('visible');
+  }
 }
 
 // ===== RENDER ROWS =====
@@ -212,6 +279,10 @@ function createCard(game) {
     playHoverSound();
   });
 
+  card.addEventListener('pointerleave', () => {
+    cancelHeroVideoTimer();
+  });
+
   card.addEventListener('click', () => launchGame(game));
 
   return card;
@@ -220,16 +291,97 @@ function createCard(game) {
 // ===== LAUNCH GAME =====
 
 async function launchGame(game) {
+  showLaunchOverlay(game);
+
   try {
-    const result = await window.api.launchGame(game.platform, game.romPath);
+    const result = await window.api.launchGame(game.platform, game.romPath, game.emulator);
     if (result.success) {
       showToast(`${game.title} wird gestartet...`);
     } else {
+      hideLaunchOverlay();
       showToast(`Fehler: ${result.error}`, true);
     }
   } catch (err) {
+    hideLaunchOverlay();
     showToast(`Fehler: ${err.message}`, true);
   }
+}
+
+function showLaunchOverlay(game) {
+  const overlay = document.getElementById('launchOverlay');
+  const backdrop = document.getElementById('launchBackdrop');
+  const logo = overlay?.querySelector('.launch-logo');
+  const title = document.getElementById('launchTitle');
+  const platform = document.getElementById('launchPlatform');
+  const cover = document.getElementById('launchCover');
+  const card = document.getElementById('launchCard');
+  const status = document.getElementById('launchStatus');
+  const bar = overlay?.querySelector('.launch-bar');
+
+  if (!overlay) return;
+
+  const imageUrl = game.heroArt || game.coverArt || '';
+  if (backdrop) {
+    backdrop.style.backgroundImage = imageUrl ? `url('${imageUrl}')` : '';
+  }
+
+  title.textContent = `${game.title} wird gestartet`;
+  platform.textContent = game.platform === 'WiiU' ? 'Wii U' : game.platform;
+  status.textContent = 'Emulator wird vorbereitet';
+
+  if (cover && card) {
+    if (game.coverArt) {
+      cover.src = game.coverArt;
+      cover.alt = game.title;
+      card.classList.remove('hidden');
+    } else {
+      cover.removeAttribute('src');
+      cover.alt = '';
+      card.classList.add('hidden');
+    }
+  }
+
+  overlay.classList.add('visible');
+
+  const gsap = window.gsap;
+  if (!gsap) return;
+
+  launchTimeline?.kill();
+  gsap.set(overlay, { autoAlpha: 1 });
+  gsap.set(backdrop, { scale: 1.08, autoAlpha: 0.42 });
+
+  launchTimeline = gsap.timeline();
+  launchTimeline
+    .fromTo(backdrop, { scale: 1.14, autoAlpha: 0 }, { scale: 1.08, autoAlpha: 0.48, duration: 0.85, ease: 'power2.out' })
+    .fromTo(card, { y: 70, scale: 0.72, rotateX: 14, autoAlpha: 0 }, { y: 0, scale: 1, rotateX: 0, autoAlpha: 1, duration: 0.75, ease: 'power4.out' }, '-=0.55')
+    .fromTo([logo, title, platform, status, bar], { y: 22, autoAlpha: 0 }, { y: 0, autoAlpha: 1, stagger: 0.07, duration: 0.48, ease: 'power3.out' }, '-=0.48');
+}
+
+function hideLaunchOverlay() {
+  const overlay = document.getElementById('launchOverlay');
+  if (!overlay) return;
+
+  const gsap = window.gsap;
+  launchTimeline?.kill();
+  launchTimeline = null;
+
+  if (!gsap) {
+    overlay.classList.remove('visible');
+    return;
+  }
+
+  gsap.to(overlay, {
+    autoAlpha: 0,
+    duration: 0.22,
+    ease: 'power2.in',
+    onComplete: () => overlay.classList.remove('visible'),
+  });
+}
+
+function setupLauncherEvents() {
+  window.api.onLauncherRestored?.(() => {
+    hideLaunchOverlay();
+  });
 }
 
 // ===== FILTERS =====

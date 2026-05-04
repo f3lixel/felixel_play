@@ -2,7 +2,8 @@ node_modules/
 emulators/**/*
 !emulators/README.md
 !emulators/dolphin/
-!emulators/ryujinx/
+!emulators/Sudachi/
+!emulators/ryujinx-canary--win_x64/
 roms/**/*
 !roms/README.md
 !roms/wii/

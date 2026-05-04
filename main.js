@@ -4,12 +4,16 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let launchHideTimer = null;
 
 function createWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icons', 'app-icon.svg');
+
   mainWindow = new BrowserWindow({
     fullscreen: true,
     frame: false,
     kiosk: false,
+    icon: iconPath,
     backgroundColor: '#141414',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -26,6 +30,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  app.setAppUserModelId('felixel.play');
   createWindow();
 
   globalShortcut.register('Escape', () => {
@@ -67,7 +72,8 @@ const ROM_FOLDERS = [
 
 const EMULATORS = {
   dolphin: path.join(__dirname, 'emulators', 'dolphin', 'Dolphin-x64', 'Dolphin.exe'),
-  ryujinx: path.join(__dirname, 'emulators', 'ryujinx', 'Ryujinx.exe'),
+  sudachi: path.join(__dirname, 'emulators', 'Sudachi', 'sudachi.exe'),
+  ryujinxCanary: path.join(__dirname, 'emulators', 'ryujinx-canary--win_x64', 'Ryujinx.exe'),
 };
 
 function toAppPath(filePath) {
@@ -91,9 +97,16 @@ function restoreLauncherWindow() {
     return;
   }
 
+  if (launchHideTimer) {
+    clearTimeout(launchHideTimer);
+    launchHideTimer = null;
+  }
+
+  mainWindow.setAlwaysOnTop(false);
   mainWindow.show();
   mainWindow.setFullScreen(true);
   mainWindow.focus();
+  mainWindow.webContents.send('launcher-restored');
 }
 
 function readGameMetadata() {
@@ -150,6 +163,8 @@ function buildGameLibrary() {
         romPath,
         coverArt: existing?.coverArt || '',
         heroArt: existing?.heroArt || '',
+        heroVideo: existing?.heroVideo || '',
+        emulator: existing?.emulator || '',
         backgroundMusic: existing?.backgroundMusic || '',
       });
     }
@@ -164,17 +179,21 @@ ipcMain.handle('read-games', async () => {
   return buildGameLibrary();
 });
 
-ipcMain.handle('launch-game', async (_event, { platform, romPath }) => {
+ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) => {
   const absoluteRomPath = path.join(__dirname, romPath);
 
   if (!fs.existsSync(absoluteRomPath)) {
     return { success: false, error: `ROM nicht gefunden: ${romPath}` };
   }
 
+  const switchCommand = emulator === 'ryujinxCanary'
+    ? { cmd: EMULATORS.ryujinxCanary, args: [absoluteRomPath], hideDelayMs: 6500 }
+    : { cmd: EMULATORS.sudachi, args: ['-f', '-g', absoluteRomPath], hideDelayMs: 6500 };
+
   const commands = {
-    Wii:    { cmd: EMULATORS.dolphin, args: ['--batch', '--exec', absoluteRomPath] },
-    WiiU:   { cmd: EMULATORS.dolphin, args: ['--batch', '--exec', absoluteRomPath] },
-    Switch: { cmd: EMULATORS.ryujinx, args: [absoluteRomPath] },
+    Wii:    { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=false', '-C', 'Graphics.Settings.DumpTextures=false', '-C', 'Graphics.Settings.HiresTextures=false', '--exec', absoluteRomPath], hideDelayMs: 7000 },
+    WiiU:   { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=false', '-C', 'Graphics.Settings.DumpTextures=false', '-C', 'Graphics.Settings.HiresTextures=false', '--exec', absoluteRomPath], hideDelayMs: 7000 },
+    Switch: switchCommand,
   };
 
   const entry = commands[platform];
@@ -204,13 +223,33 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath }) => {
     child.once('error', (err) => {
       console.error(`Fehler beim Starten: ${err.message}`);
       settled = true;
+      if (launchHideTimer) {
+        clearTimeout(launchHideTimer);
+        launchHideTimer = null;
+      }
       restoreLauncherWindow();
       resolve({ success: false, error: err.message });
     });
 
     child.once('spawn', () => {
       console.log(`Gestartet: ${entry.cmd} ${entry.args.join(' ')}`);
-      mainWindow?.hide();
+      mainWindow?.setAlwaysOnTop(true, 'screen-saver');
+      mainWindow?.setFullScreen(true);
+      mainWindow?.focus();
+      mainWindow?.moveTop();
+
+      if (launchHideTimer) {
+        clearTimeout(launchHideTimer);
+      }
+
+      launchHideTimer = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setAlwaysOnTop(false);
+          mainWindow.hide();
+        }
+        launchHideTimer = null;
+      }, entry.hideDelayMs);
+
       settled = true;
       resolve({ success: true });
     });

@@ -31,6 +31,7 @@
   <section class="hero" id="hero">
     <div class="hero-bg" id="heroBg1"></div>
     <div class="hero-bg" id="heroBg2" style="opacity: 0;"></div>
+    <video id="heroVideo" class="hero-video" muted loop playsinline></video>
     <div class="hero-gradient"></div>
     <div class="hero-content" id="heroContent">
       <div class="hero-platform-badge" id="heroBadge"></div>
@@ -56,6 +57,27 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
+  <!-- Launch Transition -->
+  <div class="launch-overlay" id="launchOverlay">
+    <div class="launch-backdrop" id="launchBackdrop"></div>
+    <div class="launch-scrim"></div>
+    <div class="launch-content">
+      <div class="launch-meta">
+        <div class="launch-logo">felixel <span>play</span></div>
+        <div class="launch-title" id="launchTitle">Spiel wird gestartet</div>
+        <div class="launch-platform" id="launchPlatform"></div>
+      </div>
+      <div class="launch-card" id="launchCard">
+        <img id="launchCover" class="launch-cover" alt="">
+      </div>
+      <div class="launch-status" id="launchStatus">Emulator wird vorbereitet</div>
+      <div class="launch-bar">
+        <div class="launch-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="node_modules/gsap/dist/gsap.min.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
