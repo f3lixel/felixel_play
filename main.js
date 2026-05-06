@@ -5,6 +5,7 @@ const fs = require('fs');
 
 let mainWindow;
 let launchHideTimer = null;
+const LAUNCH_GRACE_MS = 2500;
 
 function createWindow() {
   const iconPath = path.join(__dirname, 'assets', 'icons', 'app-icon.svg');
@@ -82,6 +83,20 @@ function toAppPath(filePath) {
 
 function normalizeGamePath(filePath) {
   return filePath.replace(/\\/g, '/').toLowerCase();
+}
+
+function resolveAppPath(filePath) {
+  return path.isAbsolute(filePath) ? filePath : path.join(__dirname, filePath);
+}
+
+function resolveLaunchPath(romPath, launchPath) {
+  const candidates = [launchPath, romPath].filter(Boolean);
+  return candidates
+    .map((candidate) => ({
+      configuredPath: candidate,
+      absolutePath: resolveAppPath(candidate),
+    }))
+    .find((candidate) => fs.existsSync(candidate.absolutePath));
 }
 
 function titleFromFileName(filePath) {
@@ -164,6 +179,7 @@ function buildGameLibrary() {
         coverArt: existing?.coverArt || '',
         heroArt: existing?.heroArt || '',
         heroVideo: existing?.heroVideo || '',
+        launchPath: existing?.launchPath || '',
         emulator: existing?.emulator || '',
         backgroundMusic: existing?.backgroundMusic || '',
       });
@@ -179,12 +195,18 @@ ipcMain.handle('read-games', async () => {
   return buildGameLibrary();
 });
 
-ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) => {
-  const absoluteRomPath = path.join(__dirname, romPath);
+ipcMain.handle('quit-app', () => {
+  app.quit();
+});
 
-  if (!fs.existsSync(absoluteRomPath)) {
-    return { success: false, error: `ROM nicht gefunden: ${romPath}` };
+ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator, launchPath }) => {
+  const launchTarget = resolveLaunchPath(romPath, launchPath);
+
+  if (!launchTarget) {
+    return { success: false, error: `ROM nicht gefunden: ${launchPath || romPath}` };
   }
+
+  const { absolutePath: absoluteRomPath } = launchTarget;
 
   const switchCommand = emulator === 'ryujinxCanary'
     ? { cmd: EMULATORS.ryujinxCanary, args: [absoluteRomPath], hideDelayMs: 6500 }
@@ -211,6 +233,7 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
 
   return new Promise((resolve) => {
     const workingDirectory = path.dirname(entry.cmd);
+    let startGraceTimer = null;
 
     const child = spawn(entry.cmd, entry.args, {
       cwd: workingDirectory,
@@ -221,6 +244,10 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
     let settled = false;
 
     child.once('error', (err) => {
+      if (startGraceTimer) {
+        clearTimeout(startGraceTimer);
+      }
+
       console.error(`Fehler beim Starten: ${err.message}`);
       settled = true;
       if (launchHideTimer) {
@@ -238,20 +265,24 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
       mainWindow?.focus();
       mainWindow?.moveTop();
 
-      if (launchHideTimer) {
-        clearTimeout(launchHideTimer);
-      }
+      startGraceTimer = setTimeout(() => {
+        if (settled) return;
 
-      launchHideTimer = setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.setAlwaysOnTop(false);
-          mainWindow.hide();
+        if (launchHideTimer) {
+          clearTimeout(launchHideTimer);
         }
-        launchHideTimer = null;
-      }, entry.hideDelayMs);
 
-      settled = true;
-      resolve({ success: true });
+        launchHideTimer = setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.setAlwaysOnTop(false);
+            mainWindow.hide();
+          }
+          launchHideTimer = null;
+        }, entry.hideDelayMs);
+
+        settled = true;
+        resolve({ success: true });
+      }, LAUNCH_GRACE_MS);
     });
 
     child.once('exit', (code, signal) => {
@@ -259,6 +290,10 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
       restoreLauncherWindow();
 
       if (!settled) {
+        if (startGraceTimer) {
+          clearTimeout(startGraceTimer);
+        }
+
         settled = true;
         resolve({
           success: false,

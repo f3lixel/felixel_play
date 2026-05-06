@@ -4,14 +4,19 @@
   --bg-primary: #141414;
   --bg-card: #1a1a1a;
   --bg-card-hover: #2a2a2a;
-  --accent-red: #e50914;
-  --accent-red-hover: #f6121d;
+  --accent-red: #e60012;
+  --accent-red-hover: #ff1f2f;
   --text-primary: #ffffff;
   --text-secondary: #b3b3b3;
   --text-muted: #808080;
   --badge-wii: #e0e0e0;
   --badge-wiiu: #00bcd4;
   --badge-switch: #e60012;
+  --sidebar-closed: 80px;
+  --sidebar-open: 260px;
+  --sidebar-bg: #0a0a0a;
+  --sidebar-border: #ffffff10;
+  --transition-sidebar: 0.4s cubic-bezier(0.2, 0, 0, 1);
   --transition-snappy: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-smooth: 0.6s cubic-bezier(0.25, 0.1, 0.25, 1);
   --row-height: 220px;
@@ -40,67 +45,282 @@ html, body {
   display: none;
 }
 
-/* ===== NAVBAR ===== */
+/* ===== SIDEBAR ===== */
 
-.navbar {
+.app-sidebar {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
-  z-index: 100;
+  bottom: 0;
+  z-index: 300;
+  width: var(--sidebar-closed);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  padding: 1.25rem 0.85rem;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 28%),
+    var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  box-shadow: 18px 0 70px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: width var(--transition-sidebar), box-shadow var(--transition-sidebar);
+}
+
+.app-sidebar:hover {
+  width: var(--sidebar-open);
+  box-shadow: 28px 0 90px rgba(0, 0, 0, 0.62);
+}
+
+.sidebar-logo {
+  width: 100%;
+  min-height: 50px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 3.5rem;
-  background: linear-gradient(to bottom, rgba(20, 20, 20, 0.9) 0%, transparent 100%);
-  transition: background var(--transition-snappy);
+  justify-content: center;
+  gap: 0;
+  padding: 0.1rem 0;
 }
 
-.navbar.scrolled {
-  background: rgba(20, 20, 20, 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+.sidebar-logo-mark {
+  flex: 0 0 50px;
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 35% 24%, rgba(255, 255, 255, 0.18), transparent 34%),
+    var(--accent-red);
+  color: #fff;
+  box-shadow: 0 0 34px rgba(230, 0, 18, 0.34);
 }
 
-.navbar-logo {
+.sidebar-logo-img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+
+.sidebar-logo-text {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-10px);
   font-family: 'Bebas Neue', cursive;
-  font-size: 2.2rem;
-  letter-spacing: 0.08em;
+  font-size: 1.85rem;
+  letter-spacing: 0.09em;
   color: var(--accent-red);
   text-transform: uppercase;
+  white-space: nowrap;
+  transition: width var(--transition-sidebar), opacity var(--transition-sidebar), transform var(--transition-sidebar);
 }
 
-.navbar-logo span {
+.sidebar-logo-text span {
   color: var(--text-primary);
 }
 
-.navbar-filters {
-  display: flex;
-  gap: 0.25rem;
+.app-sidebar:hover .sidebar-logo {
+  justify-content: flex-start;
+  gap: 0.85rem;
+  padding: 0.1rem 0.15rem;
 }
 
-.filter-btn {
-  padding: 0.5rem 1.25rem;
+.app-sidebar:hover .sidebar-logo-text {
+  width: 150px;
+}
+
+.app-sidebar:hover .sidebar-logo-text,
+.app-sidebar:hover .sidebar-label,
+.app-sidebar:hover .sidebar-section-title,
+.app-sidebar:hover .sidebar-search input {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.sidebar-search {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  transition: border-color var(--transition-snappy), background var(--transition-snappy);
+}
+
+.app-sidebar:hover .sidebar-search {
+  justify-content: flex-start;
+  gap: 0.75rem;
+  padding: 0 0.8rem;
+}
+
+.sidebar-search:focus-within {
+  border-color: rgba(230, 0, 18, 0.62);
+  background: rgba(230, 0, 18, 0.08);
+}
+
+.sidebar-search input {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  transform: translateX(-8px);
   border: none;
-  border-radius: 4px;
+  background: transparent;
+  outline: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.88rem;
+  transition: width var(--transition-sidebar), opacity var(--transition-sidebar), transform var(--transition-sidebar);
+}
+
+.app-sidebar:hover .sidebar-search input {
+  width: 150px;
+}
+
+.sidebar-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.sidebar-nav {
+  width: 100%;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.sidebar-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sidebar-section-title {
+  height: 18px;
+  padding: 0 0.75rem;
+  opacity: 0;
+  transform: translateX(-8px);
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: opacity var(--transition-sidebar), transform var(--transition-sidebar);
+}
+
+.sidebar-item {
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-radius: 17px;
   background: transparent;
   color: var(--text-secondary);
   font-family: 'Inter', sans-serif;
-  font-size: 0.85rem;
-  font-weight: 500;
-  letter-spacing: 0.03em;
+  font-size: 0.9rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: all var(--transition-snappy);
+  overflow: hidden;
+  transition:
+    color var(--transition-snappy),
+    background var(--transition-snappy),
+    transform var(--transition-snappy);
 }
 
-.filter-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+.app-sidebar:hover .sidebar-item {
+  justify-content: flex-start;
+  gap: 0.82rem;
+  padding: 0 0.78rem;
 }
 
-.filter-btn.active {
+.sidebar-item:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.app-sidebar:hover .sidebar-item:hover {
+  transform: translateX(3px);
+}
+
+.sidebar-item.active {
+  color: var(--text-primary);
+  background: rgba(230, 0, 18, 0.18);
+}
+
+.sidebar-item.active::after {
+  content: '';
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: var(--accent-red);
+  box-shadow: 0 0 18px rgba(230, 0, 18, 0.8);
+}
+
+.sidebar-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar-label {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(-8px);
+  text-align: left;
+  white-space: nowrap;
+  transition: width var(--transition-sidebar), opacity var(--transition-sidebar), transform var(--transition-sidebar);
+}
+
+.app-sidebar:hover .sidebar-label {
+  width: 150px;
+}
+
+.sidebar-footer {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sidebar-exit:hover {
+  color: #fff;
+  background: rgba(230, 0, 18, 0.2);
+}
+
+.content-shell {
+  position: relative;
+  min-height: 100vh;
+  margin-left: var(--sidebar-closed);
+  transition: margin-left var(--transition-sidebar), filter var(--transition-sidebar), transform var(--transition-sidebar);
+}
+
+.app-sidebar:hover ~ .content-shell {
+  filter: blur(2px) brightness(0.86);
+  transform: translateX(20px);
 }
 
 /* ===== HERO SECTION ===== */
@@ -697,6 +917,40 @@ html, body {
 @keyframes launchCardSheen {
   0%, 42% { transform: translateX(-130%); }
   68%, 100% { transform: translateX(130%); }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --sidebar-closed: 72px;
+    --sidebar-open: min(260px, 82vw);
+  }
+
+  .app-sidebar {
+    padding-inline: 0.7rem;
+  }
+
+  .sidebar-logo-mark {
+    flex-basis: 46px;
+    width: 46px;
+    height: 46px;
+  }
+
+  .content-shell {
+    margin-left: var(--sidebar-closed);
+  }
+
+  .app-sidebar:hover ~ .content-shell {
+    transform: translateX(8px);
+  }
+
+  .hero-content {
+    left: 1.5rem;
+    max-width: min(620px, calc(100vw - 8rem));
+  }
+
+  .game-row {
+    padding: 0 1.5rem;
+  }
 }
 
 @media (max-width: 760px) {

@@ -6,8 +6,10 @@ let currentHeroGame = null;
 let heroToggle = false; // tracks which hero-bg layer is active
 let heroVideoTimer = null;
 let launchTimeline = null;
+let searchQuery = '';
 
 const HERO_VIDEO_DELAY_MS = 2000;
+const RECENT_GAMES_KEY = 'felixel:recent-games';
 
 // ===== INIT =====
 
@@ -15,6 +17,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   createParticles();
   setupNavbarScroll();
   setupFilterButtons();
+  setupSidebarSearch();
+  setupSidebarActions();
   setupLauncherEvents();
 
   try {
@@ -27,7 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setHeroGame(allGames[0], true);
   }
 
-  renderRows(allGames);
+  renderRows(getVisibleGames());
 
   setTimeout(() => {
     document.getElementById('loadingScreen').classList.add('hidden');
@@ -138,15 +142,23 @@ function renderRows(games) {
   container.innerHTML = '';
 
   if (games.length === 0) {
+    const emptyMessage = currentFilter === 'recent'
+      ? 'Starte ein Spiel, damit es hier in deiner Chronik erscheint.'
+      : 'Lege deine ROM-Dateien in roms/wii, roms/wiiu oder roms/switch ab.';
+
     container.innerHTML = `
       <div class="game-row">
         <h2 class="row-title">Keine Spiele gefunden</h2>
         <p style="color: var(--text-secondary); max-width: 560px;">
-          Lege deine ROM-Dateien in roms/wii, roms/wiiu oder roms/switch ab.
-          Danach erscheinen sie automatisch in felixel play.
+          ${emptyMessage}
         </p>
       </div>
     `;
+    return;
+  }
+
+  if (currentFilter === 'recent') {
+    container.appendChild(createRow('Zuletzt gespielt', games));
     return;
   }
 
@@ -166,6 +178,22 @@ function renderRows(games) {
 
     container.appendChild(createRow(label, rowGames));
   }
+}
+
+function getVisibleGames() {
+  const query = searchQuery.trim().toLowerCase();
+  let games = currentFilter === 'recent'
+    ? getRecentGames()
+    : allGames.filter(game => currentFilter === 'all' || game.platform === currentFilter);
+
+  if (query) {
+    games = games.filter(game => {
+      const platformLabel = game.platform === 'WiiU' ? 'wii u' : game.platform.toLowerCase();
+      return game.title.toLowerCase().includes(query) || platformLabel.includes(query);
+    });
+  }
+
+  return games;
 }
 
 function groupByPlatform(games) {
@@ -294,8 +322,9 @@ async function launchGame(game) {
   showLaunchOverlay(game);
 
   try {
-    const result = await window.api.launchGame(game.platform, game.romPath, game.emulator);
+    const result = await window.api.launchGame(game.platform, game.romPath, game.emulator, game.launchPath);
     if (result.success) {
+      rememberPlayedGame(game);
       showToast(`${game.title} wird gestartet...`);
     } else {
       hideLaunchOverlay();
@@ -305,6 +334,28 @@ async function launchGame(game) {
     hideLaunchOverlay();
     showToast(`Fehler: ${err.message}`, true);
   }
+}
+
+function rememberPlayedGame(game) {
+  const recentIds = getRecentGameIds().filter(id => id !== game.id);
+  recentIds.unshift(game.id);
+  localStorage.setItem(RECENT_GAMES_KEY, JSON.stringify(recentIds.slice(0, 12)));
+}
+
+function getRecentGameIds() {
+  try {
+    const recentIds = JSON.parse(localStorage.getItem(RECENT_GAMES_KEY) || '[]');
+    return Array.isArray(recentIds) ? recentIds : [];
+  } catch {
+    return [];
+  }
+}
+
+function getRecentGames() {
+  const gameById = new Map(allGames.map(game => [game.id, game]));
+  return getRecentGameIds()
+    .map(id => gameById.get(id))
+    .filter(Boolean);
 }
 
 function showLaunchOverlay(game) {
@@ -393,7 +444,47 @@ function setupFilterButtons() {
       buttons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       currentFilter = btn.dataset.filter;
-      renderRows(allGames);
+      renderRows(getVisibleGames());
+      playHoverSound();
+    });
+
+    btn.addEventListener('pointerenter', playHoverSound);
+  });
+}
+
+function setupSidebarSearch() {
+  const searchInput = document.getElementById('sidebarSearch');
+  if (!searchInput) return;
+
+  searchInput.addEventListener('input', (event) => {
+    searchQuery = event.target.value;
+    renderRows(getVisibleGames());
+  });
+
+  searchInput.addEventListener('focus', playHoverSound);
+}
+
+function setupSidebarActions() {
+  const actions = document.querySelectorAll('.sidebar-action');
+  actions.forEach(action => {
+    action.addEventListener('pointerenter', playHoverSound);
+    action.addEventListener('click', async () => {
+      playHoverSound();
+
+      switch (action.dataset.action) {
+        case 'emulator-status':
+          showToast(`${allGames.length} Spiele geladen. Emulatoren werden beim Start geprüft.`);
+          break;
+        case 'settings':
+          showToast('Einstellungen kommen bald.');
+          break;
+        case 'quit':
+          await window.api.quitApp?.();
+          window.close();
+          break;
+        default:
+          break;
+      }
     });
   });
 }
@@ -402,6 +493,8 @@ function setupFilterButtons() {
 
 function setupNavbarScroll() {
   const navbar = document.getElementById('navbar');
+  if (!navbar) return;
+
   window.addEventListener('scroll', () => {
     navbar.classList.toggle('scrolled', window.scrollY > 50);
   });

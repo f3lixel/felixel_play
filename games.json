@@ -37,8 +37,9 @@
     "id": "5",
     "title": "Super Smash Bros. Ultimate",
     "platform": "Switch",
-    "romPath": "roms/switch/SmashUltimate.nsp",
-    "coverArt": "assets/covers/smash-ultimate.jpg",
+    "romPath": "roms/switch/Super Smash Bros Ultimate [01006A800016E000][v0].nsp",
+    "coverArt": "assets/covers/hochforrmat.webp",
+    "heroArt": "assets/covers/thumb-1920-927337.png",
     "backgroundMusic": ""
   },
   {
@@ -85,6 +86,7 @@
     "title": "Tomodachi Life: Living the Dream",
     "platform": "Switch",
     "romPath": "roms/switch/Tomodachi Life Living the Dream.nsp",
+    "launchPath": "C:/Users/f3lix/OneDrive/games/Nintendo Switch/Tomodachi Life Living the Dream.nsp",
     "emulator": "ryujinxCanary",
     "coverArt": "",
     "heroArt": "",
