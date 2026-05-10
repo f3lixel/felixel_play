@@ -63,15 +63,14 @@ html, body {
 }
 
 .navbar-logo {
-  font-family: 'Bebas Neue', cursive;
-  font-size: 2.2rem;
-  letter-spacing: 0.08em;
-  color: var(--accent-red);
-  text-transform: uppercase;
+  display: flex;
+  align-items: center;
 }
 
-.navbar-logo span {
-  color: var(--text-primary);
+.navbar-logo img {
+  height: 35px;
+  width: auto;
+  display: block;
 }
 
 .navbar-filters {
@@ -490,15 +489,16 @@ html, body {
 }
 
 .loading-logo {
-  font-family: 'Bebas Neue', cursive;
-  font-size: 4rem;
-  letter-spacing: 0.1em;
-  color: var(--accent-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   animation: loadingPulse 1.5s ease-in-out infinite;
 }
 
-.loading-logo span {
-  color: var(--text-primary);
+.loading-logo img {
+  height: 80px;
+  width: auto;
+  display: block;
 }
 
 @keyframes loadingPulse {
@@ -590,16 +590,15 @@ html, body {
 }
 
 .launch-logo {
-  font-family: 'Bebas Neue', cursive;
-  font-size: 2rem;
-  letter-spacing: 0.1em;
-  color: var(--accent-red);
-  text-transform: uppercase;
-  text-shadow: 0 0 24px rgba(229, 9, 20, 0.3);
+  display: flex;
+  align-items: center;
 }
 
-.launch-logo span {
-  color: var(--text-primary);
+.launch-logo img {
+  height: 40px;
+  width: auto;
+  display: block;
+  filter: drop-shadow(0 0 24px rgba(229, 9, 20, 0.3));
 }
 
 .launch-title {

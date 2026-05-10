@@ -10,6 +10,7 @@
     "electron": "^41.2.2"
   },
   "dependencies": {
-    "gsap": "^3.15.0"
+    "gsap": "^3.15.0",
+    "koffi": "^2.16.2"
   }
 }

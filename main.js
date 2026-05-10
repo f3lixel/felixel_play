@@ -12,6 +12,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     fullscreen: true,
     frame: false,
+    thickFrame: false,
     kiosk: false,
     icon: iconPath,
     backgroundColor: '#141414',
@@ -71,9 +72,8 @@ const ROM_FOLDERS = [
 ];
 
 const EMULATORS = {
-  dolphin: path.join(__dirname, 'emulators', 'dolphin', 'Dolphin-x64', 'Dolphin.exe'),
-  sudachi: path.join(__dirname, 'emulators', 'Sudachi', 'sudachi.exe'),
-  ryujinxCanary: path.join(__dirname, 'emulators', 'ryujinx-canary--win_x64', 'Ryujinx.exe'),
+  dolphin: path.join(__dirname, 'emulators', 'Dolphin-x64', 'Dolphin.exe'),
+  ryujinxCanary: path.join(__dirname, 'emulators', 'ryujinx-canary-1.3.287-win_x64', 'publish', 'Ryujinx.exe'),
 };
 
 function toAppPath(filePath) {
@@ -186,13 +186,11 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
     return { success: false, error: `ROM nicht gefunden: ${romPath}` };
   }
 
-  const switchCommand = emulator === 'ryujinxCanary'
-    ? { cmd: EMULATORS.ryujinxCanary, args: [absoluteRomPath], hideDelayMs: 6500 }
-    : { cmd: EMULATORS.sudachi, args: ['-f', '-g', absoluteRomPath], hideDelayMs: 6500 };
+  const switchCommand = { cmd: EMULATORS.ryujinxCanary, args: ['--fullscreen', absoluteRomPath], hideDelayMs: 15000 };
 
   const commands = {
-    Wii:    { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=false', '-C', 'Graphics.Settings.DumpTextures=false', '-C', 'Graphics.Settings.HiresTextures=false', '--exec', absoluteRomPath], hideDelayMs: 7000 },
-    WiiU:   { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=false', '-C', 'Graphics.Settings.DumpTextures=false', '-C', 'Graphics.Settings.HiresTextures=false', '--exec', absoluteRomPath], hideDelayMs: 7000 },
+    Wii:    { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Display.Fullscreen=True', '-C', 'Dolphin.Interface.UsePanicHandlers=False', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=False', '--exec', absoluteRomPath], hideDelayMs: 10000 },
+    WiiU:   { cmd: EMULATORS.dolphin, args: ['--batch', '-C', 'Dolphin.Display.Fullscreen=True', '-C', 'Dolphin.Interface.UsePanicHandlers=False', '-C', 'Dolphin.Interface.OnScreenDisplayMessages=False', '--exec', absoluteRomPath], hideDelayMs: 10000 },
     Switch: switchCommand,
   };
 
@@ -216,6 +214,10 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator }) =>
       cwd: workingDirectory,
       stdio: 'ignore',
       windowsHide: false,
+      env: {
+        ...process.env,
+        QT_PLUGIN_PATH: path.join(workingDirectory, 'QtPlugins'),
+      },
     });
 
     let settled = false;
