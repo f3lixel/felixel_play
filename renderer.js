@@ -1,345 +1,611 @@
+const { webFrame } = typeof require === 'function' ? require('electron') : { webFrame: null };
+
+const TV_TEST_ZOOM_FACTOR = 1.3;
+
+function setUiZoomFactor(zoomFactor = 1) {
+  if (webFrame) {
+    webFrame.setZoomFactor(zoomFactor);
+    return true;
+  }
+
+  if (window.api?.setZoomFactor) {
+    window.api.setZoomFactor(zoomFactor);
+    return true;
+  }
+
+  console.warn('[Zoom] Electron webFrame ist in diesem Renderer nicht verfügbar.');
+  return false;
+}
+
+window.setFelixelTvZoom = (enabled = true) => {
+  setUiZoomFactor(enabled ? TV_TEST_ZOOM_FACTOR : 1);
+};
+
 // ===== STATE =====
 
 let allGames = [];
-let currentFilter = 'all';
-let currentHeroGame = null;
-let heroToggle = false; // tracks which hero-bg layer is active
-let heroVideoTimer = null;
+let currentFocusedGame = null;
+let bgToggle = false;
 let launchTimeline = null;
-let searchQuery = '';
+let focusedGames = [];
+let currentIndex = -1;
+let gamepadManager = null;
+let gamepadHintTimer = null;
+let focusSelectionTimer = null;
 
-const HERO_VIDEO_DELAY_MS = 2000;
+const FOCUS_SELECTION_DELAY_MS = 120;
 const RECENT_GAMES_KEY = 'felixel:recent-games';
+
+let currentCategory = 'recent';
 
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', async () => {
-  createParticles();
-  setupNavbarScroll();
-  setupFilterButtons();
-  setupSidebarSearch();
-  setupSidebarActions();
   setupLauncherEvents();
+  setupKeyboardNavigation();
+  setupGamepadInput();
+  setupInGameOverlay();
+  setupTopBarControls();
+  setupControllerOverlay();
+  setupCategoryTabs();
+  startClock();
+  startDate();
+  updateWifi();
+  window.addEventListener('online', updateWifi);
+  window.addEventListener('offline', updateWifi);
 
+  // Spiele laden & Shelf rendern parallel zum Intro
+  window.api.readGames()
+    .then(games => { allGames = games; })
+    .catch(() => { allGames = []; })
+    .then(() => renderShelf());
+
+  // Video-Intro läuft; wenn es endet, wird der Loading-Screen direkt ausgeblendet.
+  // Als Fallback (kein Video / Fehler) greift die Boot-Audio-Sequenz.
+  setupVideoIntro();
+
+  // Hover-Sound vorladen (nach erstem Nutzer-Kontext)
+  loadHoverSound();
+
+  // Boot-Audio + Loading-Screen (greift sobald Audio endet ODER Video bereits fertig ist)
   try {
-    allGames = await window.api.readGames();
-  } catch {
-    allGames = [];
-  }
-
-  if (allGames.length > 0) {
-    setHeroGame(allGames[0], true);
-  }
-
-  renderRows(getVisibleGames());
-
-  setTimeout(() => {
+    await bootAudioSequence();
+  } catch (err) {
+    console.warn('Boot audio sequence failed:', err);
+  } finally {
     document.getElementById('loadingScreen').classList.add('hidden');
-  }, 800);
+  }
 });
 
-// ===== HERO =====
+// ===== VIDEO INTRO =====
 
-function setHeroGame(game, immediate = false) {
-  if (currentHeroGame?.id === game.id) {
-    if (!immediate && game.heroVideo) {
-      scheduleHeroVideoPreview(game);
+function setupVideoIntro() {
+  const overlay = document.getElementById('videoIntro');
+  const video   = document.getElementById('introVideo');
+  if (!overlay || !video) return;
+
+  // Sicher stumm schalten (video hat bereits muted-Attribut, doppelt hält besser)
+  video.volume = 0;
+  video.muted  = true;
+
+  const dismiss = () => {
+    // Loading-Screen sofort ausblenden – kein Warten auf 15s Boot-Audio mehr
+    document.getElementById('loadingScreen')?.classList.add('hidden');
+
+    // Video-Overlay sanft ausblenden
+    if (window.gsap) {
+      gsap.to(overlay, {
+        opacity: 0,
+        duration: 0.7,
+        ease: 'power2.inOut',
+        onComplete: () => overlay.classList.add('hidden'),
+      });
+    } else {
+      overlay.style.transition = 'opacity 0.7s ease';
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.classList.add('hidden'), 720);
     }
-    return;
-  }
+  };
 
-  stopHeroVideoPreview();
-  currentHeroGame = game;
+  video.addEventListener('ended',  dismiss);
+  video.addEventListener('error',  () => setTimeout(dismiss, 300));
 
-  const bg1 = document.getElementById('heroBg1');
-  const bg2 = document.getElementById('heroBg2');
-  const title = document.getElementById('heroTitle');
-  const badge = document.getElementById('heroBadge');
-  const playBtn = document.getElementById('heroPlayBtn');
+  // Autoplay starten (in Electron normalerweise immer erlaubt)
+  video.play().catch(() => setTimeout(dismiss, 500));
+}
+
+// ===== BACKGROUND / FOCUSED GAME =====
+
+// ===== BACKGROUND TRANSITION CONSTANTS =====
+const BG_DURATION      = 0.62;   // Gesamtdauer der Einblende-Animation
+const BG_FADE_OUT_MUL  = 0.65;   // Fade-Out der alten Schicht: 65% der Gesamtdauer
+const BG_SCALE_START   = 1.08;   // Parallax: neue Schicht startet vergrößert
+const BG_SCALE_END     = 1.0;    // Parallax: neue Schicht endet bei natürlicher Größe
+const BG_BLUR_OUT      = 8;      // Blur in px auf der alten Schicht beim Fade-Out
+
+function setFocusedGame(game, immediate = false) {
+  cancelFocusSelection();
+
+  if (currentFocusedGame?.id === game.id) return;
+  currentFocusedGame = game;
+
+  // bgActive  = neue Schicht  → Fade-In  + Parallax scale(1.08 → 1.0)
+  // bgPrevious = alte Schicht → Fade-Out + blur(0 → BG_BLUR_OUT px)
+  const bgActive   = document.getElementById(bgToggle ? 'bgLayer2' : 'bgLayer1');
+  const bgPrevious = document.getElementById(bgToggle ? 'bgLayer1' : 'bgLayer2');
+  bgToggle = !bgToggle;
 
   const coverUrl = game.heroArt || game.coverArt || '';
-  const activeBg = heroToggle ? bg2 : bg1;
-  const inactiveBg = heroToggle ? bg1 : bg2;
 
-  activeBg.style.backgroundImage = `url('${coverUrl}')`;
-
-  if (immediate) {
-    activeBg.style.opacity = '1';
-    inactiveBg.style.opacity = '0';
-  } else {
-    activeBg.style.opacity = '1';
-    inactiveBg.style.opacity = '0';
-  }
-
-  heroToggle = !heroToggle;
-
-  title.textContent = game.title;
-  badge.textContent = game.platform === 'WiiU' ? 'Wii U' : game.platform;
-  badge.className = `hero-platform-badge badge-${game.platform}`;
-
-  playBtn.onclick = () => launchGame(game);
-
-  if (!immediate && game.heroVideo) {
-    scheduleHeroVideoPreview(game);
-  }
-}
-
-function scheduleHeroVideoPreview(game) {
-  cancelHeroVideoTimer();
-  heroVideoTimer = setTimeout(() => {
-    playHeroVideoPreview(game);
-  }, HERO_VIDEO_DELAY_MS);
-}
-
-function cancelHeroVideoTimer() {
-  if (heroVideoTimer) {
-    clearTimeout(heroVideoTimer);
-    heroVideoTimer = null;
-  }
-}
-
-function stopHeroVideoPreview() {
-  cancelHeroVideoTimer();
-
-  const video = document.getElementById('heroVideo');
-  if (!video) return;
-
-  video.classList.remove('visible');
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
-}
-
-async function playHeroVideoPreview(game) {
-  if (currentHeroGame?.id !== game.id || !game.heroVideo) return;
-
-  const video = document.getElementById('heroVideo');
-  if (!video) return;
-
-  if (video.getAttribute('src') !== game.heroVideo) {
-    video.src = game.heroVideo;
-    video.load();
-  }
-
-  video.muted = true;
-  video.loop = true;
-  video.playsInline = true;
-
-  try {
-    await video.play();
-    if (currentHeroGame?.id === game.id) {
-      video.classList.add('visible');
+  // ── Immediate / Fallback ─────────────────────────────────────────────────
+  if (immediate || !window.gsap) {
+    bgActive.style.backgroundImage = coverUrl ? `url('${coverUrl}')` : '';
+    if (window.gsap) {
+      gsap.set(bgActive,   { opacity: 1, scale: BG_SCALE_END, filter: 'blur(0px)' });
+      gsap.set(bgPrevious, { opacity: 0, scale: BG_SCALE_END, filter: 'blur(0px)' });
+    } else {
+      bgActive.style.opacity   = '1';
+      bgPrevious.style.opacity = '0';
     }
-  } catch {
-    video.classList.remove('visible');
-  }
-}
-
-// ===== RENDER ROWS =====
-
-function renderRows(games) {
-  const container = document.getElementById('rowsContainer');
-  container.innerHTML = '';
-
-  if (games.length === 0) {
-    const emptyMessage = currentFilter === 'recent'
-      ? 'Starte ein Spiel, damit es hier in deiner Chronik erscheint.'
-      : 'Lege deine ROM-Dateien in roms/wii, roms/wiiu oder roms/switch ab.';
-
-    container.innerHTML = `
-      <div class="game-row">
-        <h2 class="row-title">Keine Spiele gefunden</h2>
-        <p style="color: var(--text-secondary); max-width: 560px;">
-          ${emptyMessage}
-        </p>
-      </div>
-    `;
     return;
   }
 
-  if (currentFilter === 'recent') {
-    container.appendChild(createRow('Zuletzt gespielt', games));
-    return;
-  }
+  // ── Laufende Tweens abbrechen & alte Schicht bereinigen ──────────────────
+  gsap.killTweensOf([bgActive, bgPrevious]);
+  // Filter der alten Schicht zurücksetzen, falls sie mid-blur abgebrochen wurde
+  gsap.set(bgPrevious, { filter: 'blur(0px)', scale: BG_SCALE_END });
 
-  const groups = groupByPlatform(games);
-  const rowOrder = [
-    { key: 'all', label: 'Alle Spiele' },
-    { key: 'Wii', label: 'Wii' },
-    { key: 'WiiU', label: 'Wii U' },
-    { key: 'Switch', label: 'Nintendo Switch' },
-  ];
+  // ── Neue Schicht vorbereiten: neues Bild, unsichtbar, skaliert ───────────
+  bgActive.style.backgroundImage = coverUrl ? `url('${coverUrl}')` : '';
+  gsap.set(bgActive, { opacity: 0, scale: BG_SCALE_START, filter: 'blur(0px)' });
 
-  for (const { key, label } of rowOrder) {
-    const rowGames = key === 'all' ? games : groups[key];
-    if (!rowGames || rowGames.length === 0) continue;
-    if (currentFilter !== 'all' && key !== currentFilter && key !== 'all') continue;
-    if (currentFilter !== 'all' && key === 'all') continue;
+  // ── Neue Schicht: Fade-In + Parallax-Zoom (spec Punkt 2 + 3) ────────────
+  gsap.to(bgActive, {
+    opacity: 1,
+    scale: BG_SCALE_END,
+    duration: BG_DURATION,
+    ease: 'power2.out',
+    force3D: true,
+  });
 
-    container.appendChild(createRow(label, rowGames));
+  // ── Alte Schicht: Fade-Out + Blur (spec Punkt 2) ─────────────────────────
+  gsap.to(bgPrevious, {
+    opacity: 0,
+    filter: `blur(${BG_BLUR_OUT}px)`,
+    duration: BG_DURATION * BG_FADE_OUT_MUL,
+    ease: 'power2.in',
+    force3D: true,
+    onComplete() {
+      // ── State-Reset (spec Punkt 4): alte Schicht erhält das aktuelle Bild ──
+      // Stiller Tausch – keine Sichtbarkeit, da opacity = 0
+      bgPrevious.style.backgroundImage = coverUrl ? `url('${coverUrl}')` : '';
+      gsap.set(bgPrevious, {
+        opacity: 0,
+        scale: BG_SCALE_END,
+        filter: 'blur(0px)',
+      });
+    },
+  });
+}
+
+function scheduleFocusedGame(game) {
+  cancelFocusSelection();
+  focusSelectionTimer = setTimeout(() => {
+    focusSelectionTimer = null;
+    setFocusedGame(game);
+  }, FOCUS_SELECTION_DELAY_MS);
+}
+
+function cancelFocusSelection() {
+  if (focusSelectionTimer) {
+    clearTimeout(focusSelectionTimer);
+    focusSelectionTimer = null;
   }
 }
 
-function getVisibleGames() {
-  const query = searchQuery.trim().toLowerCase();
-  let games = currentFilter === 'recent'
-    ? getRecentGames()
-    : allGames.filter(game => currentFilter === 'all' || game.platform === currentFilter);
+// ===== RENDER SHELF =====
 
-  if (query) {
-    games = games.filter(game => {
-      const platformLabel = game.platform === 'WiiU' ? 'wii u' : game.platform.toLowerCase();
-      return game.title.toLowerCase().includes(query) || platformLabel.includes(query);
-    });
-  }
+function renderShelf(animate = false) {
+  const shelf = document.getElementById('gameShelf');
+  if (!shelf) return;
 
-  return games;
-}
+  const doRender = () => {
+    shelf.innerHTML = '';
 
-function groupByPlatform(games) {
-  return games.reduce((acc, game) => {
-    if (!acc[game.platform]) acc[game.platform] = [];
-    acc[game.platform].push(game);
-    return acc;
-  }, {});
-}
+    const sorted = getSortedGames();
+    focusedGames = sorted;
 
-function createRow(title, games) {
-  const row = document.createElement('div');
-  row.className = 'game-row';
+    if (sorted.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'shelf-empty';
+      const emptyMessages = {
+        recent: 'Noch keine Spiele gespielt. Starte ein Spiel, um es hier zu sehen.',
+        switch: 'Keine Nintendo Switch Spiele gefunden. Lege ROMs in roms/switch ab.',
+        wii: 'Keine Wii / Wii U Spiele gefunden. Lege ROMs in roms/wii oder roms/wiiu ab.',
+      };
+      empty.textContent = emptyMessages[currentCategory] ?? 'Keine Spiele gefunden.';
+      shelf.appendChild(empty);
+      currentIndex = -1;
 
-  const titleEl = document.createElement('h2');
-  titleEl.className = 'row-title';
-  titleEl.textContent = title;
-  row.appendChild(titleEl);
-
-  const wrapper = document.createElement('div');
-  wrapper.className = 'row-slider-wrapper';
-
-  const slider = document.createElement('div');
-  slider.className = 'row-slider';
-
-  for (const game of games) {
-    slider.appendChild(createCard(game));
-  }
-
-  const arrowLeft = document.createElement('button');
-  arrowLeft.className = 'row-arrow row-arrow-left';
-  arrowLeft.innerHTML = '&#8249;';
-  arrowLeft.onclick = () => scrollRow(slider, -1);
-
-  const arrowRight = document.createElement('button');
-  arrowRight.className = 'row-arrow row-arrow-right';
-  arrowRight.innerHTML = '&#8250;';
-  arrowRight.onclick = () => scrollRow(slider, 1);
-
-  wrapper.appendChild(arrowLeft);
-  wrapper.appendChild(slider);
-  wrapper.appendChild(arrowRight);
-
-  slider.addEventListener('wheel', (e) => {
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      e.preventDefault();
-      slider.scrollLeft += e.deltaY;
+      if (animate && window.gsap) {
+        gsap.fromTo(empty, { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0, duration: 0.4, ease: 'power3.out' });
+      }
+      return;
     }
-  }, { passive: false });
 
-  row.appendChild(wrapper);
-  return row;
-}
+    const fragment = document.createDocumentFragment();
+    for (const [index, game] of sorted.entries()) {
+      fragment.appendChild(createShelfCard(game, index));
+    }
+    shelf.appendChild(fragment);
 
-function scrollRow(slider, direction) {
-  const scrollAmount = slider.clientWidth * 0.75;
-  slider.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
-}
+    currentIndex = currentIndex < 0 ? 0 : Math.min(currentIndex, sorted.length - 1);
+    setFocusedGameByIndex(currentIndex, { scroll: true, playSound: false, immediateHero: true });
 
-// ===== GAME CARD =====
-
-function createCard(game) {
-  const card = document.createElement('div');
-  card.className = 'game-card';
-
-  const imageWrapper = document.createElement('div');
-  imageWrapper.className = 'card-image-wrapper';
-
-  const img = new Image();
-  img.className = 'card-image';
-  img.alt = game.title;
-  if (game.coverArt) {
-    img.src = game.coverArt;
-  } else {
-    img.style.display = 'none';
-  }
-  img.onerror = () => {
-    img.style.display = 'none';
-    const placeholder = document.createElement('div');
-    placeholder.className = 'card-placeholder';
-    placeholder.textContent = game.title;
-    imageWrapper.insertBefore(placeholder, imageWrapper.firstChild);
+    if (animate && window.gsap) {
+      const cards = Array.from(shelf.querySelectorAll('.shelf-card'));
+      gsap.fromTo(
+        cards,
+        { autoAlpha: 0, y: 36, scale: 0.84 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          scale: 1,
+          stagger: { each: 0.04, from: 'start' },
+          duration: 0.42,
+          ease: 'power3.out',
+          clearProps: 'transform,opacity,visibility',
+        },
+      );
+    }
   };
-  imageWrapper.appendChild(img);
 
-  if (!game.coverArt) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'card-placeholder';
-    placeholder.textContent = game.title;
-    imageWrapper.insertBefore(placeholder, imageWrapper.firstChild);
+  const existing = Array.from(shelf.children);
+  if (animate && existing.length > 0 && window.gsap) {
+    gsap.timeline({ onComplete: doRender }).to(existing, {
+      autoAlpha: 0,
+      y: -22,
+      scale: 0.9,
+      stagger: { each: 0.012, from: 'start' },
+      duration: 0.18,
+      ease: 'power2.in',
+    });
+  } else {
+    doRender();
+  }
+}
+
+function getSortedGames() {
+  const recentIds = getRecentGameIds();
+
+  let pool;
+  switch (currentCategory) {
+    case 'recent': {
+      const played = recentIds.map(id => allGames.find(g => g.id === id)).filter(Boolean);
+      pool = played.length > 0
+        ? played
+        : [...allGames].sort((a, b) => a.title.localeCompare(b.title, 'de', { sensitivity: 'base' }));
+      return pool;
+    }
+    case 'switch':
+      pool = allGames.filter(g => g.platform === 'Switch');
+      break;
+    case 'wii':
+      pool = allGames.filter(g => g.platform === 'Wii' || g.platform === 'WiiU');
+      break;
+    default:
+      pool = [...allGames];
   }
 
-  const overlay = document.createElement('div');
-  overlay.className = 'card-info-overlay';
+  return pool.sort((a, b) => {
+    const ai = recentIds.indexOf(a.id);
+    const bi = recentIds.indexOf(b.id);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.title.localeCompare(b.title, 'de', { sensitivity: 'base' });
+  });
+}
 
-  const cardTitle = document.createElement('div');
-  cardTitle.className = 'card-title';
-  cardTitle.textContent = game.title;
+// ===== SHELF CARD =====
 
-  const cardBadge = document.createElement('span');
-  cardBadge.className = `card-platform badge-${game.platform}`;
-  cardBadge.textContent = game.platform === 'WiiU' ? 'Wii U' : game.platform;
+function createShelfCard(game, index) {
+  const card = document.createElement('div');
+  card.className = 'shelf-card game-card';
+  card.dataset.gameId = game.id;
+  card.tabIndex = 0;
+  card.setAttribute('role', 'option');
+  card.setAttribute('aria-selected', 'false');
+  card.setAttribute('aria-label', `${game.title} starten`);
 
-  overlay.appendChild(cardTitle);
-  overlay.appendChild(cardBadge);
-  imageWrapper.appendChild(overlay);
-  card.appendChild(imageWrapper);
+  if (game.coverArt) {
+    const img = new Image();
+    img.className = 'shelf-card-img';
+    img.alt = game.title;
+    img.loading = index < 8 ? 'eager' : 'lazy';
+    img.decoding = 'async';
+    img.fetchPriority = index < 4 ? 'high' : 'auto';
+    img.src = game.coverArt;
+    img.onerror = () => {
+      img.remove();
+      card.appendChild(makePlaceholder(game.title));
+    };
+    card.appendChild(img);
+  } else {
+    card.appendChild(makePlaceholder(game.title));
+  }
+
+  card.addEventListener('click', () => {
+    const idx = focusedGames.findIndex(g => g.id === game.id);
+    if (idx === currentIndex) {
+      launchGame(game);
+    } else {
+      setFocusedGameByIndex(idx);
+    }
+  });
 
   card.addEventListener('pointerenter', () => {
-    setHeroGame(game);
-    playHoverSound();
+    const idx = focusedGames.findIndex(g => g.id === game.id);
+    if (idx !== -1 && idx !== currentIndex) {
+      setFocusedGameByIndex(idx, { scroll: false, playSound: true, updateHero: true });
+    }
   });
 
-  card.addEventListener('pointerleave', () => {
-    cancelHeroVideoTimer();
+  card.addEventListener('focus', () => {
+    const idx = focusedGames.findIndex(g => g.id === game.id);
+    if (idx !== -1 && idx !== currentIndex) {
+      setFocusedGameByIndex(idx, { scroll: false, playSound: true, updateHero: true });
+    }
   });
 
-  card.addEventListener('click', () => launchGame(game));
+  card.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      launchGame(game);
+    }
+  });
 
   return card;
 }
 
+function makePlaceholder(title) {
+  const el = document.createElement('div');
+  el.className = 'shelf-card-placeholder';
+  el.textContent = title;
+  return el;
+}
+
+// ===== FOCUS MANAGEMENT =====
+
+function setFocusedGameByIndex(index, options = {}) {
+  const { scroll = true, playSound = true, updateHero = true, immediateHero = false } = options;
+  if (index < 0 || index >= focusedGames.length) return;
+
+  const previous = document.querySelector('.shelf-card.is-focused');
+  previous?.classList.remove('is-focused', 'active');
+  previous?.setAttribute('aria-selected', 'false');
+
+  currentIndex = index;
+  const game = focusedGames[currentIndex];
+
+  const card = document.querySelector(`.shelf-card[data-game-id="${game.id}"]`);
+  if (!card) return;
+
+  card.classList.add('is-focused', 'active');
+  card.setAttribute('aria-selected', 'true');
+
+  if (updateHero) {
+    if (immediateHero) {
+      setFocusedGame(game, true);
+    } else {
+      scheduleFocusedGame(game);
+    }
+  }
+
+  if (scroll) {
+    card.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+  }
+
+  if (playSound) {
+    playHoverSound();
+  }
+}
+
+function setupKeyboardNavigation() {
+  document.addEventListener('keydown', (e) => {
+    const target = e.target;
+    const isTyping = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
+    if (isTyping) return;
+
+    switch (e.key) {
+      case 'ArrowLeft':
+        e.preventDefault();
+        moveFocus('left');
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        moveFocus('right');
+        break;
+      case 'Enter':
+        if (document.activeElement?.classList?.contains('game-card')) return;
+        e.preventDefault();
+        launchFocusedGame();
+        break;
+      default:
+        break;
+    }
+  });
+}
+
+// ===== TOP BAR CONTROLS =====
+
+function setupTopBarControls() {
+  document.getElementById('btnPower')?.addEventListener('click', openSettings);
+  document.getElementById('btnChat')?.addEventListener('click', () => showToast('Chat folgt bald.'));
+  document.getElementById('btnActivities')?.addEventListener('click', () => showToast('Aktivitäten folgen bald.'));
+  document.getElementById('btnCalendar')?.addEventListener('click', () => showToast('Kalender folgt bald.'));
+  document.getElementById('btnTrophies')?.addEventListener('click', () => showToast('Trophäen folgen bald.'));
+  document.getElementById('btnSwitch')?.addEventListener('click', () => showToast('Wechseln folgt bald.'));
+  document.querySelectorAll('.ps5-social-btn').forEach(btn => {
+    btn.addEventListener('click', () => showToast('Social-Funktion folgt bald.'));
+  });
+}
+
+// ===== CATEGORY TABS =====
+
+function setupCategoryTabs() {
+  document.querySelectorAll('.ps5-category').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const category = btn.dataset.category;
+
+      if (category === 'playstation' || category === 'ds') {
+        showToast('Diese Kategorie folgt bald.');
+        return;
+      }
+
+      if (category === currentCategory) return;
+
+      currentCategory = category;
+
+      document.querySelectorAll('.ps5-category').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+
+      currentIndex = -1;
+      renderShelf(true);
+    });
+  });
+}
+
+// ===== CONTROLLER OVERLAY =====
+
+function setupControllerOverlay() {
+  const overlay = document.getElementById('controllerOverlay');
+  const btnOpen = document.getElementById('btnController');
+  const btnClose = document.getElementById('btnControllerClose');
+
+  btnOpen?.addEventListener('click', () => overlay?.classList.remove('hidden'));
+  btnClose?.addEventListener('click', () => overlay?.classList.add('hidden'));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay?.classList.contains('hidden')) {
+      overlay.classList.add('hidden');
+    }
+  });
+}
+
+// ===== CLOCK, DATE & WIFI =====
+
+function startClock() {
+  updateClock();
+  setInterval(updateClock, 60000);
+}
+
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const el = document.getElementById('clockDisplay');
+  if (el) el.textContent = `${h}:${m}`;
+}
+
+function startDate() {
+  updateDate();
+  const now = new Date();
+  const msToMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) - now;
+  setTimeout(() => {
+    updateDate();
+    setInterval(updateDate, 86400000);
+  }, msToMidnight);
+}
+
+function updateDate() {
+  const now = new Date();
+  const d = String(now.getDate()).padStart(2, '0');
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const y = now.getFullYear();
+  const el = document.getElementById('dateDisplay');
+  if (el) el.textContent = `${d}.${m}.${y}`;
+}
+
+function updateWifi() {
+  const online = navigator.onLine;
+  document.getElementById('wifiIcon')?.classList.toggle('hidden', !online);
+  document.getElementById('wifiOffIcon')?.classList.toggle('hidden', online);
+}
+
 // ===== LAUNCH GAME =====
 
+let isLaunchInProgress = false;
+let isLauncherAudioMuted = false;
+
 async function launchGame(game) {
+  if (isLaunchInProgress) return;
+  isLaunchInProgress = true;
+
   showLaunchOverlay(game);
 
   try {
-    const result = await window.api.launchGame(game.platform, game.romPath, game.emulator, game.launchPath);
+    const controllerInfo = getActiveControllerInfo();
+    const result = await window.api.launchGame(
+      game.platform,
+      game.romPath,
+      game.emulator,
+      game.launchPath,
+      controllerInfo,
+    );
     if (result.success) {
+      muteLauncherAudio();
+      hideLaunchOverlay();
       rememberPlayedGame(game);
       showToast(`${game.title} wird gestartet...`);
     } else {
+      unmuteLauncherAudio();
       hideLaunchOverlay();
       showToast(`Fehler: ${result.error}`, true);
+      isLaunchInProgress = false;
     }
   } catch (err) {
+    unmuteLauncherAudio();
     hideLaunchOverlay();
     showToast(`Fehler: ${err.message}`, true);
+    isLaunchInProgress = false;
   }
+}
+
+function getActiveControllerInfo() {
+  if (!navigator.getGamepads) return null;
+
+  const gamepads = Array.from(navigator.getGamepads()).filter(Boolean);
+  if (gamepads.length === 0) return null;
+
+  const isVirtual = (gp) => /vjoy|virtual|vigem|scpvbus|phantom|ds4windows/i.test(gp.id || '');
+  const real = gamepads.filter((gp) => !isVirtual(gp));
+  if (real.length === 0) return null;
+
+  const pick = real.find((gp) => gp.mapping === 'standard') || real[0];
+  return parseControllerInfo(pick);
+}
+
+function parseControllerInfo(gamepad) {
+  const id = gamepad.id || '';
+  const vendorMatch = id.match(/Vendor:?\s*([0-9a-f]{4})/i);
+  const productMatch = id.match(/Product:?\s*([0-9a-f]{4})/i);
+  const vendorId = vendorMatch ? vendorMatch[1].toLowerCase() : '';
+  const productId = productMatch ? productMatch[1].toLowerCase() : '';
+
+  let type = 'generic';
+  if (/dualsense|0ce6|0df2/i.test(id)) type = 'dualsense';
+  else if (/dualshock|0:054c|054c.*05c4|054c.*09cc|054c.*0ba0/i.test(id) || vendorId === '054c') type = 'dualshock4';
+  else if (/pro\s*controller|057e.*2009/i.test(id) || (vendorId === '057e' && productId === '2009')) type = 'switchpro';
+  else if (/xbox|xinput|microsoft|045e/i.test(id) || vendorId === '045e') type = 'xbox';
+
+  return { id, mapping: gamepad.mapping || '', vendorId, productId, type };
 }
 
 function rememberPlayedGame(game) {
   const recentIds = getRecentGameIds().filter(id => id !== game.id);
   recentIds.unshift(game.id);
-  localStorage.setItem(RECENT_GAMES_KEY, JSON.stringify(recentIds.slice(0, 12)));
+  localStorage.setItem(RECENT_GAMES_KEY, JSON.stringify(recentIds.slice(0, 20)));
 }
 
 function getRecentGameIds() {
@@ -432,116 +698,277 @@ function hideLaunchOverlay() {
 function setupLauncherEvents() {
   window.api.onLauncherRestored?.(() => {
     hideLaunchOverlay();
+    unmuteLauncherAudio();
+    isLaunchInProgress = false;
+    // Re-render shelf to reflect updated sort order
+    currentIndex = -1;
+    renderShelf();
   });
 }
 
-// ===== FILTERS =====
+// ===== GAMEPAD UI BRIDGE =====
 
-function setupFilterButtons() {
-  const buttons = document.querySelectorAll('.filter-btn');
-  buttons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      buttons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentFilter = btn.dataset.filter;
-      renderRows(getVisibleGames());
-      playHoverSound();
-    });
+function setupGamepadInput() {
+  if (!window.GamepadManager || !navigator.getGamepads) {
+    console.warn('[Gamepad] Web Gamepad API ist in diesem Renderer nicht verfügbar.');
+    return;
+  }
 
-    btn.addEventListener('pointerenter', playHoverSound);
+  if (gamepadManager) return;
+
+  gamepadManager = new window.GamepadManager({
+    deadzone: 0.35,
+    onConnect: (gamepad) => {
+      const friendlyName = describeGamepad(gamepad);
+      console.info(`[Gamepad] Verbunden: ${gamepad.id} (mapping=${gamepad.mapping || 'n/a'})`);
+      showToast(`Controller verbunden: ${friendlyName}`);
+      hideGamepadHint();
+    },
+    onDisconnect: (gamepad) => {
+      console.info(`[Gamepad] Getrennt: ${gamepad.id}`);
+      showToast(`Controller getrennt: ${describeGamepad(gamepad)}`);
+      document.body.classList.remove('is-gamepad-mode');
+    },
+    onNavigate: (direction) => {
+      moveFocus(direction);
+    },
+    onAction: (action) => {
+      handleGamepadAction(action);
+    },
+    onInputModeChange: (mode) => {
+      document.body.classList.toggle('is-gamepad-mode', mode === 'gamepad');
+    },
   });
+
+  gamepadManager.start();
+  window.felixelGamepadManager = gamepadManager;
+
+  gamepadHintTimer = setTimeout(() => {
+    const gamepads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
+    if (gamepads.length === 0) {
+      showGamepadHint();
+    }
+  }, 2500);
 }
 
-function setupSidebarSearch() {
-  const searchInput = document.getElementById('sidebarSearch');
-  if (!searchInput) return;
-
-  searchInput.addEventListener('input', (event) => {
-    searchQuery = event.target.value;
-    renderRows(getVisibleGames());
-  });
-
-  searchInput.addEventListener('focus', playHoverSound);
+function describeGamepad(gamepad) {
+  const id = gamepad?.id || 'Controller';
+  if (/pro\s*controller|switch/i.test(id)) return 'Switch Pro Controller';
+  if (/dualsense|ps5/i.test(id)) return 'DualSense (PS5)';
+  if (/dualshock|054c|sony|playstation/i.test(id)) return 'DualShock (PS4)';
+  if (/xbox|xinput|microsoft/i.test(id)) return 'Xbox Controller';
+  if (/nintendo/i.test(id)) return 'Nintendo Controller';
+  return id.length > 40 ? `${id.slice(0, 40)}…` : id;
 }
 
-function setupSidebarActions() {
-  const actions = document.querySelectorAll('.sidebar-action');
-  actions.forEach(action => {
-    action.addEventListener('pointerenter', playHoverSound);
-    action.addEventListener('click', async () => {
-      playHoverSound();
-
-      switch (action.dataset.action) {
-        case 'emulator-status':
-          showToast(`${allGames.length} Spiele geladen. Emulatoren werden beim Start geprüft.`);
-          break;
-        case 'settings':
-          showToast('Einstellungen kommen bald.');
-          break;
-        case 'quit':
-          await window.api.quitApp?.();
-          window.close();
-          break;
-        default:
-          break;
-      }
-    });
-  });
+function handleGamepadAction(action) {
+  switch (action) {
+    case 'confirm':
+      launchFocusedGame();
+      break;
+    case 'back':
+      handleBackAction();
+      break;
+    case 'settings':
+      openSettings();
+      break;
+    case 'tabLeft':
+      navigateTab('left');
+      break;
+    case 'tabRight':
+      navigateTab('right');
+      break;
+    default:
+      break;
+  }
 }
 
-// ===== NAVBAR SCROLL =====
+// ===== TAB NAVIGATION =====
 
-function setupNavbarScroll() {
-  const navbar = document.getElementById('navbar');
-  if (!navbar) return;
+const NAVIGABLE_TABS = ['recent', 'switch', 'wii'];
 
-  window.addEventListener('scroll', () => {
-    navbar.classList.toggle('scrolled', window.scrollY > 50);
+function navigateTab(direction) {
+  const idx = NAVIGABLE_TABS.indexOf(currentCategory);
+  const currentIdx = idx === -1 ? 0 : idx;
+
+  const nextIdx = direction === 'left'
+    ? (currentIdx - 1 + NAVIGABLE_TABS.length) % NAVIGABLE_TABS.length
+    : (currentIdx + 1) % NAVIGABLE_TABS.length;
+
+  const nextCategory = NAVIGABLE_TABS[nextIdx];
+  document.querySelector(`.ps5-category[data-category="${nextCategory}"]`)?.click();
+}
+
+function moveFocus(direction) {
+  if (focusedGames.length === 0) return;
+
+  let delta = 0;
+  if (direction === 'left') delta = -1;
+  else if (direction === 'right') delta = 1;
+  else return;
+
+  const nextIndex = Math.max(0, Math.min(focusedGames.length - 1, currentIndex + delta));
+  if (nextIndex !== currentIndex) {
+    setFocusedGameByIndex(nextIndex);
+    document.querySelector('.game-card.active')?.focus({ preventScroll: true });
+  }
+}
+
+function launchFocusedGame() {
+  const game = focusedGames[currentIndex];
+  if (!game) return;
+  launchGame(game);
+}
+
+function launchGameById(gameId) {
+  const game = allGames.find(candidate => candidate.id === gameId);
+  if (!game) return;
+  launchGame(game);
+}
+
+function handleBackAction() {
+  const controllerOverlay = document.getElementById('controllerOverlay');
+  if (!controllerOverlay?.classList.contains('hidden')) {
+    controllerOverlay.classList.add('hidden');
+    return;
+  }
+
+  const launchOverlay = document.getElementById('launchOverlay');
+  if (launchOverlay?.classList.contains('visible')) {
+    hideLaunchOverlay();
+  }
+}
+
+function openSettings() {
+  showToast('Einstellungen kommen bald.');
+}
+
+function showGamepadHint() {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = 'Controller erkannt? Drücke einen Knopf zum Aktivieren.';
+  toast.className = 'toast visible';
+}
+
+function hideGamepadHint() {
+  if (gamepadHintTimer) {
+    clearTimeout(gamepadHintTimer);
+    gamepadHintTimer = null;
+  }
+}
+
+// ===== BOOT AUDIO SEQUENCE =====
+
+let audioCtx = null;
+
+/**
+ * Lädt bootsound.wav und dashboard final sound.wav, spielt sie mit einem
+ * präzisen 2-Sekunden-Crossfade ab und gibt ein Promise zurück, das sich
+ * auflöst, sobald bootsound.wav endet (≈ t=15s).
+ *
+ * GainNode-Kette:
+ *   bootSource → bootGain ─┐
+ *                           ├─► AudioContext.destination
+ *   dashSource → dashGain ─┘
+ */
+async function bootAudioSequence() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Beide WAV-Dateien parallel laden und dekodieren
+  const [bootBuffer, dashBuffer] = await Promise.all([
+    fetch('assets/sounds/bootsound/bootsound.wav')
+      .then(r => r.arrayBuffer())
+      .then(b => audioCtx.decodeAudioData(b)),
+    fetch('assets/sounds/bootsound/dashboard final sound.wav')
+      .then(r => r.arrayBuffer())
+      .then(b => audioCtx.decodeAudioData(b)),
+  ]);
+
+  const t0 = audioCtx.currentTime;
+  const crossfadeStart = t0 + 13.0; // Crossfade-Fenster beginnt bei Sekunde 13
+  const crossfadeEnd   = t0 + 15.0; // Crossfade endet bei Sekunde 15
+
+  // --- Boot-Sound: startet sofort, Fade-Out über die letzten 2 Sekunden ---
+  const bootSource = audioCtx.createBufferSource();
+  bootSource.buffer = bootBuffer;
+
+  const bootGain = audioCtx.createGain();
+  bootGain.gain.setValueAtTime(1.0, t0);              // volle Lautstärke ab Start
+  bootGain.gain.setValueAtTime(1.0, crossfadeStart);  // Anker: hält 1.0 bis t=13s
+  bootGain.gain.linearRampToValueAtTime(0.0, crossfadeEnd); // lineares Fade-Out 13→15s
+
+  bootSource.connect(bootGain);
+  bootGain.connect(audioCtx.destination);
+  bootSource.start(t0);
+  bootSource.stop(crossfadeEnd); // Source wird bei t=15s automatisch gestoppt
+
+  // --- Dashboard-Loop: startet bei t=13s stumm, Fade-In auf volle Lautstärke ---
+  const dashSource = audioCtx.createBufferSource();
+  dashSource.buffer = dashBuffer;
+  dashSource.loop = true; // läuft nach t=15s unendlich weiter
+
+  const dashGain = audioCtx.createGain();
+  dashGain.gain.setValueAtTime(0.0, crossfadeStart);  // stumm bei t=13s (Anker)
+  dashGain.gain.linearRampToValueAtTime(1.0, crossfadeEnd); // lineares Fade-In 13→15s
+
+  dashSource.connect(dashGain);
+  dashGain.connect(audioCtx.destination);
+  dashSource.start(crossfadeStart); // startet frame-perfekt bei t=13s
+
+  // Promise löst sich auf, sobald bootSource gestoppt wird (= t≈15s)
+  return new Promise(resolve => {
+    bootSource.onended = resolve;
   });
 }
 
 // ===== HOVER SOUND =====
 
-let audioCtx = null;
+let hoverSoundBuffer = null;
+
+async function loadHoverSound() {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const response = await fetch('assets/sounds/636677__cogfirestudios__app-ui-sound.wav');
+    const arrayBuffer = await response.arrayBuffer();
+    hoverSoundBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  } catch (err) {
+    console.warn('[HoverSound] Konnte Sound nicht laden:', err);
+  }
+}
 
 function playHoverSound() {
+  if (isLauncherAudioMuted) return;
+
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
 
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
+  if (hoverSoundBuffer) {
+    const source = audioCtx.createBufferSource();
+    const gain   = audioCtx.createGain();
 
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
+    source.buffer = hoverSoundBuffer;
+    source.connect(gain);
+    gain.connect(audioCtx.destination);
 
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-  osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.06);
-
-  gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
-
-  osc.start(audioCtx.currentTime);
-  osc.stop(audioCtx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.55, audioCtx.currentTime);
+    source.start(audioCtx.currentTime);
+  }
 }
 
-// ===== PARTICLES =====
+function muteLauncherAudio() {
+  isLauncherAudioMuted = true;
+  if (audioCtx?.state === 'running') {
+    audioCtx.suspend().catch(err => console.warn('[Audio] Launcher-Audio konnte nicht pausiert werden:', err));
+  }
+}
 
-function createParticles() {
-  const container = document.getElementById('particles');
-  const count = 25;
-
-  for (let i = 0; i < count; i++) {
-    const p = document.createElement('div');
-    p.className = 'particle';
-    const size = Math.random() * 4 + 2;
-    p.style.width = `${size}px`;
-    p.style.height = `${size}px`;
-    p.style.left = `${Math.random() * 100}%`;
-    p.style.animationDuration = `${Math.random() * 15 + 10}s`;
-    p.style.animationDelay = `${Math.random() * 10}s`;
-    container.appendChild(p);
+function unmuteLauncherAudio() {
+  isLauncherAudioMuted = false;
+  if (audioCtx?.state === 'suspended') {
+    audioCtx.resume().catch(err => console.warn('[Audio] Launcher-Audio konnte nicht fortgesetzt werden:', err));
   }
 }
 
@@ -558,4 +985,135 @@ function showToast(message, isError = false) {
   toastTimeout = setTimeout(() => {
     toast.classList.remove('visible');
   }, 3000);
+}
+
+// ===== IN-GAME PAUSE OVERLAY =====
+
+const OVERLAY_ITEMS = ['resume', 'settings', 'quit'];
+
+let overlayActive = false;
+let overlayFocusIndex = 0;
+let overlayRafId = null;
+let overlayActionFired = false;
+let overlayNavPrev = { up: false, down: false, confirm: false };
+
+function setupInGameOverlay() {
+  // Das Overlay läuft jetzt als separates transparentes Fenster (overlay.html).
+  // Der alte show-overlay Handler wird hier nicht mehr benötigt.
+  if (!window.api?.onShowOverlay) return;
+
+  document.querySelectorAll('.overlay-action').forEach((btn, i) => {
+    btn.addEventListener('click', () => {
+      overlayFocusIndex = i;
+      confirmOverlayAction();
+    });
+    btn.addEventListener('pointerenter', () => {
+      overlayFocusIndex = i;
+      updateOverlayFocus();
+    });
+  });
+}
+
+function showGameOverlay() {
+  const overlay = document.getElementById('gameOverlay');
+  if (!overlay) return;
+
+  overlayActive = true;
+  overlayFocusIndex = 0;
+  overlayActionFired = false;
+  overlayNavPrev = { up: false, down: false, confirm: false };
+
+  overlay.classList.remove('hidden');
+  updateOverlayFocus();
+
+  gamepadManager?.setEnabled(false);
+  startOverlayGamepadPoll();
+}
+
+function hideGameOverlay() {
+  const overlay = document.getElementById('gameOverlay');
+  if (!overlay) return;
+
+  overlayActive = false;
+  overlay.classList.add('hidden');
+  stopOverlayGamepadPoll();
+
+  setTimeout(() => {
+    gamepadManager?.setEnabled(true);
+  }, 450);
+}
+
+function updateOverlayFocus() {
+  document.querySelectorAll('.overlay-action').forEach((btn, i) => {
+    btn.classList.toggle('is-focused', i === overlayFocusIndex);
+  });
+}
+
+function startOverlayGamepadPoll() {
+  stopOverlayGamepadPoll();
+
+  function poll() {
+    if (!overlayActive) return;
+
+    const gp = Array.from(navigator.getGamepads?.() ?? []).find(Boolean);
+
+    if (gp) {
+      const axisY = gp.axes[1] ?? 0;
+      const up = (gp.buttons[12]?.pressed) || axisY < -0.5;
+      const down = (gp.buttons[13]?.pressed) || axisY > 0.5;
+      const confirm = gp.buttons[0]?.pressed ?? false;
+
+      if (up && !overlayNavPrev.up) {
+        overlayFocusIndex = (overlayFocusIndex - 1 + OVERLAY_ITEMS.length) % OVERLAY_ITEMS.length;
+        updateOverlayFocus();
+        playHoverSound();
+      }
+      if (down && !overlayNavPrev.down) {
+        overlayFocusIndex = (overlayFocusIndex + 1) % OVERLAY_ITEMS.length;
+        updateOverlayFocus();
+        playHoverSound();
+      }
+      if (confirm && !overlayNavPrev.confirm) {
+        confirmOverlayAction();
+      }
+
+      overlayNavPrev = { up, down, confirm };
+    }
+
+    overlayRafId = requestAnimationFrame(poll);
+  }
+
+  overlayRafId = requestAnimationFrame(poll);
+}
+
+function stopOverlayGamepadPoll() {
+  if (overlayRafId !== null) {
+    cancelAnimationFrame(overlayRafId);
+    overlayRafId = null;
+  }
+}
+
+function confirmOverlayAction() {
+  if (overlayActionFired) return;
+  overlayActionFired = true;
+
+  const action = OVERLAY_ITEMS[overlayFocusIndex];
+
+  switch (action) {
+    case 'resume':
+      hideGameOverlay();
+      window.api.resumeOverlay();
+      break;
+    case 'settings':
+      hideGameOverlay();
+      window.api.resumeOverlay();
+      openSettings();
+      break;
+    case 'quit':
+      hideGameOverlay();
+      window.api.quitEmulator();
+      break;
+    default:
+      break;
+  }
 }

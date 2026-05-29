@@ -4,132 +4,189 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>felixel play</title>
+  <link rel="stylesheet" href="tailwind.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+  <!-- Fullscreen Background Layers (Cross-Fade) -->
+  <div class="bg-layer" id="bgLayer1"></div>
+  <div class="bg-layer" id="bgLayer2" style="opacity: 0;"></div>
+  <div class="bg-overlay"></div>
+
   <!-- Loading Screen -->
   <div class="loading-screen" id="loadingScreen">
-    <div class="loading-logo">felixel <span>play</span></div>
+    <img src="assets/icons/felixel-logo.svg" class="loading-logo" alt="felixel play">
   </div>
 
-  <!-- Ambient Particles -->
-  <div class="particles" id="particles"></div>
-
-  <!-- Sidebar Navigation -->
-  <aside class="app-sidebar" id="sidebar" aria-label="Hauptnavigation">
-    <div class="sidebar-logo" aria-label="felixel play">
-      <div class="sidebar-logo-mark">
-        <img src="logo.svg" alt="" class="sidebar-logo-img">
-      </div>
-      <div class="sidebar-logo-text">felixel <span>play</span></div>
-    </div>
-
-    <label class="sidebar-search" for="sidebarSearch">
-      <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
-      </svg>
-      <input id="sidebarSearch" type="search" placeholder="Spiele suchen" autocomplete="off">
-    </label>
-
-    <div class="sidebar-nav" id="filters">
-      <div class="sidebar-section">
-        <div class="sidebar-section-title">Bibliothek</div>
-        <button class="sidebar-item filter-btn active" data-filter="all" type="button">
-          <span class="sidebar-indicator"></span>
-          <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-          </svg>
-          <span class="sidebar-label">Alle Spiele</span>
-        </button>
-        <button class="sidebar-item filter-btn" data-filter="recent" type="button">
-          <span class="sidebar-indicator"></span>
-          <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/><path d="M12 7v5l3 2"/>
-          </svg>
-          <span class="sidebar-label">Zuletzt gespielt</span>
-        </button>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-section-title">Systeme</div>
-        <button class="sidebar-item filter-btn" data-filter="Switch" type="button">
-          <span class="sidebar-indicator"></span>
-          <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="4" y="3" width="16" height="18" rx="4"/><path d="M10 4v16"/><circle cx="7" cy="8" r="1"/><circle cx="17" cy="16" r="1"/><path d="M15 8h4"/><path d="M17 6v4"/>
-          </svg>
-          <span class="sidebar-label">Nintendo Switch</span>
-        </button>
-        <button class="sidebar-item filter-btn" data-filter="WiiU" type="button">
-          <span class="sidebar-indicator"></span>
-          <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="12" rx="3"/><path d="M8 20h8"/><path d="M12 17v3"/><circle cx="8" cy="11" r="1"/><path d="M16 10h2"/><path d="M17 9v2"/>
-          </svg>
-          <span class="sidebar-label">Wii U</span>
-        </button>
-        <button class="sidebar-item filter-btn" data-filter="Wii" type="button">
-          <span class="sidebar-indicator"></span>
-          <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="8" y="3" width="8" height="18" rx="3"/><circle cx="12" cy="7" r="1"/><path d="M10 12h4"/><path d="M12 10v4"/>
-          </svg>
-          <span class="sidebar-label">Wii</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="sidebar-footer">
-      <button class="sidebar-item sidebar-action" data-action="emulator-status" type="button">
-        <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M8 21h8"/><path d="M12 17v4"/><rect x="4" y="3" width="16" height="14" rx="3"/><path d="M8 8h8"/><path d="M8 12h5"/>
-        </svg>
-        <span class="sidebar-label">Emulator Status</span>
-      </button>
-      <button class="sidebar-item sidebar-action" data-action="settings" type="button">
-        <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5.9h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>
-        </svg>
-        <span class="sidebar-label">Einstellungen</span>
-      </button>
-      <button class="sidebar-item sidebar-action sidebar-exit" data-action="quit" type="button">
-        <svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>
-        </svg>
-        <span class="sidebar-label">Beenden</span>
-      </button>
-    </div>
-  </aside>
-
-  <main class="content-shell" id="contentShell">
-    <!-- Hero Section -->
-    <section class="hero" id="hero">
-      <div class="hero-bg" id="heroBg1"></div>
-      <div class="hero-bg" id="heroBg2" style="opacity: 0;"></div>
-      <video id="heroVideo" class="hero-video" muted loop playsinline></video>
-      <div class="hero-gradient"></div>
-      <div class="hero-content" id="heroContent">
-        <div class="hero-platform-badge" id="heroBadge"></div>
-        <h1 class="hero-title" id="heroTitle"></h1>
-        <div class="hero-actions">
-          <button class="btn-play" id="heroPlayBtn">
-            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-            Spielen
-          </button>
-          <button class="btn-info" id="heroInfoBtn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
-            </svg>
-            Info
-          </button>
+  <!-- PS5-Style Top Bar -->
+  <header class="ps5-topbar">
+    <!-- Row 1: Profil + Social links | Datum + Controller + Uhr rechts -->
+    <div class="ps5-topbar-row1">
+      <div class="ps5-topbar-left">
+        <div class="ps5-avatar-wrapper">
+          <img src="assets/icons/felixel-logo.svg" class="ps5-avatar" alt="felixel play">
+          <span class="ps5-avatar-badge">+</span>
+        </div>
+        <div class="ps5-social">
+          <div class="ps5-social-item">
+            <button class="ps5-social-btn" type="button" aria-label="Freunde">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+              </svg>
+            </button>
+            <span class="ps5-social-count">5</span>
+          </div>
+          <div class="ps5-social-item">
+            <button class="ps5-social-btn" type="button" aria-label="Nachrichten">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+              </svg>
+            </button>
+            <span class="ps5-social-count">12</span>
+          </div>
         </div>
       </div>
-    </section>
+      <div class="ps5-topbar-right">
+        <span id="dateDisplay" class="ps5-date"></span>
+        <div class="ps5-ctrl-status">
+          <div class="ps5-ctrl-item">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
+              <rect x="2" y="6" width="20" height="12" rx="6"/>
+              <circle cx="7" cy="12" r="1.5" fill="white" opacity="0.5"/>
+              <circle cx="5" cy="10" r="1" fill="white" opacity="0.5"/>
+              <circle cx="9" cy="10" r="1" fill="white" opacity="0.5"/>
+              <circle cx="5" cy="14" r="1" fill="white" opacity="0.5"/>
+              <circle cx="9" cy="14" r="1" fill="white" opacity="0.5"/>
+              <circle cx="16" cy="10.5" r="1.5" fill="white" opacity="0.5"/>
+              <circle cx="16" cy="13.5" r="1.5" fill="white" opacity="0.5"/>
+            </svg>
+            <span>2</span>
+          </div>
+          <div class="ps5-ctrl-item">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
+              <rect x="2" y="6" width="20" height="12" rx="6"/>
+              <circle cx="7" cy="12" r="1.5" fill="white" opacity="0.5"/>
+              <circle cx="5" cy="10" r="1" fill="white" opacity="0.5"/>
+              <circle cx="9" cy="10" r="1" fill="white" opacity="0.5"/>
+              <circle cx="5" cy="14" r="1" fill="white" opacity="0.5"/>
+              <circle cx="9" cy="14" r="1" fill="white" opacity="0.5"/>
+              <circle cx="16" cy="10.5" r="1.5" fill="white" opacity="0.5"/>
+              <circle cx="16" cy="13.5" r="1.5" fill="white" opacity="0.5"/>
+            </svg>
+            <span>1</span>
+          </div>
+        </div>
+        <span id="wifiIcon" class="ps5-wifi" title="WLAN verbunden">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+            <path d="M1 9l2 2c5.4-5.4 14.2-5.4 19.6 0l2-2C18.5 2.8 5.5 2.8 1 9zm8 8l3 3 3-3c-1.6-1.7-4.4-1.7-6 0zm-4-4 2 2c2.7-2.7 7.3-2.7 10 0l2-2C15.1 9.8 8.9 9.8 5 13z"/>
+          </svg>
+        </span>
+        <span id="wifiOffIcon" class="ps5-wifi hidden" title="Kein WLAN">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+            <path d="M22.99 9C19.15 5.35 13.8 3.76 8.84 4.37L11 6.53c3.56-.17 7.15 1.09 9.78 3.72l2.21-2.25zM2.29 3.45l1.27 1.27C1.37 6.03.03 7.51 1 9l2-2c.53-.56 1.12-1.05 1.75-1.47l1.35 1.35C5.04 7.54 4.06 8.2 3.22 9l2.02 2.04C6.35 9.91 7.56 9.2 8.84 8.86l1.56 1.56C9.01 10.88 7.78 11.6 6.77 12.6L9 14.83c.73-.73 1.56-1.31 2.43-1.74l2.26 2.26c-.59.2-1.15.5-1.66.91L15 19l3-3-10.83-10.83L5.9 3.9 4.27 2.27 2.99 3.45z"/>
+          </svg>
+        </span>
+        <span id="clockDisplay" class="ps5-clock">00:00</span>
+      </div>
+    </div>
+  </header>
 
-    <!-- Game Rows -->
-    <div class="rows-container" id="rowsContainer"></div>
+  <!-- Shelf + Title -->
+  <main class="shelf-container" id="shelfContainer">
+    <!-- System-Icons direkt über der Kategorienleiste -->
+    <div class="ps5-sys-icons">
+      <button class="ps5-sys-btn has-dot" type="button" aria-label="Aktivitäten" id="btnActivities">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+          <path d="M21 3H3c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h5v2h8v-2h5c1.11 0 1.99-.89 1.99-2L23 5c0-1.11-.89-2-2-2zm0 14H3V5h18v12z"/>
+        </svg>
+      </button>
+      <button class="ps5-sys-btn has-dot" id="btnController" type="button" aria-label="Controller Setup">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
+          <rect x="2" y="6" width="20" height="12" rx="6"/>
+          <circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+          <circle cx="5" cy="10" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="5" cy="14" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="9" cy="14" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="16" cy="10.5" r="1.5" fill="currentColor" stroke="none"/>
+          <circle cx="16" cy="13.5" r="1.5" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button class="ps5-sys-btn" type="button" aria-label="Ausschalten" id="btnPower">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+          <path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- PS5 Kategorie-Navigation -->
+    <nav class="ps5-categories" aria-label="Kategorien">
+      <button class="ps5-category is-active" data-category="recent">Zuletzt gespielt</button>
+      <button class="ps5-category" data-category="switch">Nintendo Switch</button>
+      <button class="ps5-category" data-category="wii">Wii</button>
+      <button class="ps5-category ps5-category--soon" data-category="playstation">PlayStation</button>
+      <button class="ps5-category ps5-category--soon" data-category="ds">Nintendo DS</button>
+    </nav>
+    <div class="game-shelf" id="gameShelf" role="listbox" aria-label="Spielauswahl mit Tastatur- und Controller-Fokus"></div>
+    <div class="start-prompt" id="startPrompt">
+      Press <span class="x-btn-circle">&#x2715;</span> to start
+    </div>
   </main>
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>
+
+  <!-- Controller Setup Overlay (Vorschau) -->
+  <div id="controllerOverlay" class="controller-overlay hidden" role="dialog" aria-modal="true" aria-label="Controller Setup">
+    <div class="controller-overlay-panel">
+      <button class="controller-overlay-close" id="btnControllerClose" type="button" aria-label="Schließen">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+          <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+        </svg>
+      </button>
+      <div class="controller-preview-icon">
+        <svg viewBox="0 0 100 62" fill="none" stroke="currentColor" stroke-width="1.8" width="180" height="112" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="10" width="92" height="42" rx="21"/>
+          <!-- D-Pad -->
+          <rect x="20" y="23" width="5" height="16" rx="2"/>
+          <rect x="15" y="28" width="15" height="6" rx="2"/>
+          <!-- Face Buttons -->
+          <circle cx="70" cy="23" r="3.5"/>
+          <circle cx="78" cy="31" r="3.5"/>
+          <circle cx="70" cy="39" r="3.5"/>
+          <circle cx="62" cy="31" r="3.5"/>
+          <!-- Analog Sticks -->
+          <circle cx="36" cy="40" r="5.5"/>
+          <circle cx="64" cy="19" r="5.5"/>
+          <!-- Menu buttons -->
+          <rect x="42" y="27" width="7" height="4" rx="2"/>
+          <rect x="51" y="27" width="7" height="4" rx="2"/>
+          <!-- Shoulder bumpers -->
+          <path d="M 15 10 Q 20 4 35 4 L 45 4"/>
+          <path d="M 85 10 Q 80 4 65 4 L 55 4"/>
+        </svg>
+      </div>
+      <h2 class="controller-overlay-title">Controller Setup</h2>
+      <p class="controller-overlay-subtitle">Konfiguration folgt in einem späteren Update</p>
+    </div>
+  </div>
+
+  <!-- In-Game Pause Overlay -->
+  <div id="gameOverlay" class="game-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause-Menü">
+    <div class="game-overlay-panel">
+      <img src="assets/icons/felixel-logo.svg" class="game-overlay-logo" alt="felixel play">
+      <nav class="game-overlay-actions" aria-label="Menü-Optionen">
+        <button class="overlay-action is-focused" type="button" data-action="resume">Fortsetzen</button>
+        <button class="overlay-action" type="button" data-action="settings">Einstellungen</button>
+        <button class="overlay-action" type="button" data-action="quit">Beenden</button>
+      </nav>
+      <p class="game-overlay-hint">
+        <span>↑ ↓ Navigieren</span>
+        <span>✕ Bestätigen</span>
+      </p>
+    </div>
+  </div>
 
   <!-- Launch Transition -->
   <div class="launch-overlay" id="launchOverlay">
@@ -137,21 +194,29 @@
     <div class="launch-scrim"></div>
     <div class="launch-content">
       <div class="launch-meta">
-        <div class="launch-logo">felixel <span>play</span></div>
+        <img src="assets/icons/felixel-logo.svg" class="launch-logo" alt="felixel play">
         <div class="launch-title" id="launchTitle">Spiel wird gestartet</div>
         <div class="launch-platform" id="launchPlatform"></div>
+        <div class="launch-status" id="launchStatus">Emulator wird vorbereitet</div>
+        <div class="launch-bar">
+          <div class="launch-bar-fill"></div>
+        </div>
       </div>
       <div class="launch-card" id="launchCard">
         <img id="launchCover" class="launch-cover" alt="">
-      </div>
-      <div class="launch-status" id="launchStatus">Emulator wird vorbereitet</div>
-      <div class="launch-bar">
-        <div class="launch-bar-fill"></div>
       </div>
     </div>
   </div>
 
   <script src="node_modules/gsap/dist/gsap.min.js"></script>
+  <script src="GamepadManager.js"></script>
   <script src="renderer.js"></script>
+
+  <!-- Video Intro Overlay (höchste Z-Ebene) -->
+  <div id="videoIntro" class="video-intro">
+    <video id="introVideo" preload="auto" muted playsinline>
+      <source src="Wide.mp4" type="video/mp4">
+    </video>
+  </div>
 </body>
 </html>

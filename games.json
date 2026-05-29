@@ -99,5 +99,81 @@
     "romPath": "roms/wiiu/SM3DWorld.wud",
     "coverArt": "assets/covers/sm3dworld.jpg",
     "backgroundMusic": ""
+  },
+  {
+    "id": "12",
+    "title": "Disney Epic Mickey 2: The Power of Two",
+    "platform": "Wii",
+    "romPath": "roms/wii/Disney Epic Mickey 2 - The Power of Two (USA) (En,Fr,Es,Pt).iso",
+    "coverArt": "assets/covers/mickey mouse 2 hochformat.jpg",
+    "heroArt": "assets/covers/mickey mouse 2 querformat.jpg",
+    "heroVideo": "assets/videos/clips/mickey mouse 2 video clip.webm",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "13",
+    "title": "Mario + Rabbids Kingdom Battle",
+    "platform": "Switch",
+    "romPath": "roms/switch/Mario + Rabbids Kingdom Battle  [0100E46003042000][v0]_2.nsp",
+    "coverArt": "assets/covers/Mario + Rabbids Kingdom- battle hochformat.png",
+    "heroArt": "assets/covers/super mario rabbits king. battle querformat.jpg",
+    "heroVideo": "assets/videos/clips/mario rabbits ckup.webm",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "14",
+    "title": "Five Nights at Freddy's: Security Breach",
+    "platform": "Switch",
+    "romPath": "roms/switch/Five Nights at Freddys Security Breach [01009060193C4000][v0][US].nsp",
+    "coverArt": "assets/covers/five nights at freddy sec. breach.webp",
+    "heroArt": "assets/covers/2x1_NSwitchDS_FiveNightsAtFreddysSecurityBreach querformat.jpg",
+    "heroVideo": "assets/videos/clips/fnaf security breach video clip.webm",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "15",
+    "title": "Super Mario 3D World + Bowser's Fury",
+    "platform": "Switch",
+    "romPath": "roms/switch/Super Mario 3D World + Bowser's Fury[010028600EBDA000][US][v0].nsp",
+    "coverArt": "assets/covers/Gemini_Generated_Image_lf26wllf26wllf26.png",
+    "heroArt": "assets/covers/wp4520671-super-mario-3d-world-wallpapers.jpg",
+    "heroVideo": "assets/videos/clips/Design ohne Titel.webm",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "16",
+    "title": "Mario Kart 8 Deluxe",
+    "platform": "Switch",
+    "romPath": "roms/switch/Mario Kart 8 Deluxe [0100152000022000][v0].nsp",
+    "coverArt": "assets/covers/Mario Kart 8 Deluxe.jpg",
+    "heroArt": "assets/covers/H2x1_NSwitch_MarioKart8Deluxe_image1600w.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "17",
+    "title": "Donkey Kong Country: Tropical Freeze",
+    "platform": "Switch",
+    "romPath": "roms/switch/Donkey Kong Country Tropical Freeze.nsp",
+    "coverArt": "assets/covers/DKCT.png",
+    "heroArt": "assets/covers/DONKEY KONG COUNTRY TROPICAL.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "18",
+    "title": "Mario & Luigi: Brothership",
+    "platform": "Switch",
+    "romPath": "roms/switch/Mario and Luigi Brothership.nsp",
+    "coverArt": "assets/covers/mario-luigi-brothership-hochformAT.jpg",
+    "heroArt": "assets/covers/mario-luigi-brothership-quer.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "19",
+    "title": "Super Mario Party Jamboree",
+    "platform": "Switch",
+    "romPath": "roms/switch/Super Mario Party Jamboree v1.0.0[0100965017338000][0][APP].nsp",
+    "coverArt": "assets/covers/Super_Mario_Party_Jamboree_Wallpaper_1080x1920.webp",
+    "heroArt": "assets/covers/super_mario_party_jamboree.jpg",
+    "backgroundMusic": ""
   }
 ]

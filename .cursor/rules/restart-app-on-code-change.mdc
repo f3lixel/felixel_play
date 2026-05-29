@@ -1,0 +1,12 @@
+---
+description: App nach jeder Codeaenderung neu starten
+alwaysApply: true
+---
+
+# App bei Codeaenderungen neu starten
+
+- Wenn du Code aenderst, starte die App danach neu.
+- Falls bereits ein App-Prozess laeuft, beende ihn sauber und starte ihn erneut.
+- Nutze fuer den Start den projektueblichen Startbefehl (z. B. `npm run dev` oder `npm start`).
+- Warte nach dem Neustart auf eine erfolgreiche Startmeldung und pruefe kurz auf Laufzeitfehler.
+- Wenn ein Neustart nicht moeglich ist, nenne den Grund und den naechsten konkreten Schritt.

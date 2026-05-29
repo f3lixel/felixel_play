@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>felixel play – Overlay</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .ov-backdrop {
+      /* Negativer Inset damit kein Pixel des Displays freigelassen wird */
+      position: fixed;
+      inset: -4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.72);
+      animation: overlayFadeIn 0.2s ease forwards;
+    }
+
+    @keyframes overlayFadeIn {
+      from { opacity: 0; transform: scale(1.02); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="ov-backdrop">
+    <div class="game-overlay-panel">
+      <img src="assets/icons/felixel-logo.svg" class="game-overlay-logo" alt="felixel play">
+
+      <nav class="game-overlay-actions" id="overlayActions">
+        <button class="overlay-action is-focused" data-action="resume">Fortsetzen</button>
+        <button class="overlay-action" data-action="settings">Einstellungen</button>
+        <button class="overlay-action" data-action="quit">Beenden</button>
+      </nav>
+
+      <p class="game-overlay-hint">
+        <span>↑ ↓ Navigieren</span>
+        <span>✕ Bestätigen</span>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const ACTIONS = ['resume', 'settings', 'quit'];
+    let focusIdx = 0;
+    let actionFired = false;
+    let prevUp = false, prevDown = false, prevConfirm = false;
+    let rafId = null;
+
+    const btns = Array.from(document.querySelectorAll('.overlay-action'));
+
+    function resetState() {
+      focusIdx = 0;
+      actionFired = false;
+      prevUp = false;
+      prevDown = false;
+      prevConfirm = false;
+      updateFocus();
+    }
+
+    function updateFocus() {
+      btns.forEach((btn, i) => btn.classList.toggle('is-focused', i === focusIdx));
+    }
+
+    function fireAction() {
+      if (actionFired) return;
+      actionFired = true;
+      stopPoll();
+
+      const action = ACTIONS[focusIdx];
+      if (action === 'resume') {
+        window.api?.resumeOverlay();
+      } else if (action === 'settings') {
+        window.api?.overlayOpenSettings();
+      } else if (action === 'quit') {
+        window.api?.quitEmulator();
+      }
+    }
+
+    btns.forEach((btn, i) => {
+      btn.addEventListener('click', () => { focusIdx = i; fireAction(); });
+      btn.addEventListener('pointerenter', () => { focusIdx = i; updateFocus(); });
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp')   { focusIdx = (focusIdx - 1 + ACTIONS.length) % ACTIONS.length; updateFocus(); }
+      if (e.key === 'ArrowDown') { focusIdx = (focusIdx + 1) % ACTIONS.length; updateFocus(); }
+      if (e.key === 'Enter' || e.key === ' ') fireAction();
+      if (e.key === 'Escape') { focusIdx = 0; window.api?.resumeOverlay(); }
+    });
+
+    function pollGamepad() {
+      const gp = Array.from(navigator.getGamepads?.() ?? []).find(Boolean);
+      if (gp) {
+        const axisY = gp.axes[1] ?? 0;
+        const up      = (gp.buttons[12]?.pressed) || axisY < -0.5;
+        const down    = (gp.buttons[13]?.pressed) || axisY > 0.5;
+        const confirm = gp.buttons[0]?.pressed ?? false;
+
+        if (up && !prevUp)       { focusIdx = (focusIdx - 1 + ACTIONS.length) % ACTIONS.length; updateFocus(); }
+        if (down && !prevDown)   { focusIdx = (focusIdx + 1) % ACTIONS.length; updateFocus(); }
+        if (confirm && !prevConfirm) fireAction();
+
+        prevUp = up; prevDown = down; prevConfirm = confirm;
+      }
+      rafId = requestAnimationFrame(pollGamepad);
+    }
+
+    function stopPoll() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    }
+
+    // Status zuruecksetzen wenn Overlay erneut eingeblendet wird
+    window.api?.onShowOverlay?.(() => resetState());
+
+    pollGamepad();
+  </script>
+</body>
+</html>
