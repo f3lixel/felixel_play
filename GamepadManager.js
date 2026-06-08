@@ -15,13 +15,29 @@ const STANDARD_MAPPING = {
   dpadRight: 15,
 };
 
+const ALTERNATIVE_MAPPING = {
+  ...STANDARD_MAPPING,
+  confirm: 1,
+  back: 0,
+};
+
 // Fallback fuer Controller im non-standard Mapping (z.B. DualShock 4 ueber
 // einige Bluetooth-Stacks). Hier sind D-Pad Werte ueber Achse 9 codiert.
 const NONSTANDARD_DPAD_AXIS = 9;
 
+const CONTROLLER_SETUP_STORAGE_KEY = 'felixel:controller-setup';
+
+const DEFAULT_CONTROLLER_SETUP = {
+  version: 1,
+  global: {
+    deadzone: 0.35,
+    vibrationStrength: 1,
+    mappingProfile: 'standard',
+  },
+  controllers: [],
+};
+
 // Stichwoerter, an denen wir virtuelle/Phantom-Gamepads erkennen.
-// Diese werden von Tools wie vJoy, ViGEm, DS4Windows, JoyToKey etc. erzeugt
-// und sollen in unserem Launcher ignoriert werden.
 const VIRTUAL_GAMEPAD_PATTERNS = [
   /vjoy/i,
   /virtual/i,
@@ -38,7 +54,6 @@ function isVirtualGamepad(gamepad) {
   return VIRTUAL_GAMEPAD_PATTERNS.some((pattern) => pattern.test(id));
 }
 
-// Bewertung fuer die Gamepad-Auswahl: hoeher = bevorzugt.
 function scoreGamepad(gamepad) {
   if (!gamepad) return -1;
   if (isVirtualGamepad(gamepad)) return -1;
@@ -51,12 +66,161 @@ function scoreGamepad(gamepad) {
   return score;
 }
 
+function parseControllerInfo(gamepad) {
+  const id = gamepad?.id || '';
+  const vendorMatch = id.match(/Vendor:?\s*([0-9a-f]{4})/i);
+  const productMatch = id.match(/Product:?\s*([0-9a-f]{4})/i);
+  const vendorId = vendorMatch ? vendorMatch[1].toLowerCase() : '';
+  const productId = productMatch ? productMatch[1].toLowerCase() : '';
+
+  let type = 'generic';
+  if (/dualsense|0ce6|0df2/i.test(id)) type = 'dualsense';
+  else if (/dualshock|0:054c|054c.*05c4|054c.*09cc|054c.*0ba0/i.test(id) || vendorId === '054c') type = 'dualshock4';
+  else if (/pro\s*controller|057e.*2009/i.test(id) || (vendorId === '057e' && productId === '2009')) type = 'switchpro';
+  else if (/xbox|xinput|microsoft|045e/i.test(id) || vendorId === '045e') type = 'xbox';
+
+  return {
+    id,
+    mapping: gamepad?.mapping || '',
+    vendorId,
+    productId,
+    type,
+    index: typeof gamepad?.index === 'number' ? gamepad.index : null,
+  };
+}
+
+function describeGamepad(gamepad) {
+  const id = gamepad?.id || 'Controller';
+  if (/pro\s*controller|switch/i.test(id)) return 'Switch Pro Controller';
+  if (/dualsense|ps5/i.test(id)) return 'DualSense (PS5)';
+  if (/dualshock|054c|sony|playstation/i.test(id)) return 'DualShock (PS4)';
+  if (/xbox|xinput|microsoft/i.test(id)) return 'Xbox Controller';
+  if (/nintendo/i.test(id)) return 'Nintendo Controller';
+  return id.length > 40 ? `${id.slice(0, 40)}…` : id;
+}
+
+function hashString(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+}
+
+function getGamepadKey(gamepad) {
+  const info = parseControllerInfo(gamepad);
+  const vendor = info.vendorId || '0000';
+  const product = info.productId || '0000';
+  const idHash = hashString(info.id || `${vendor}-${product}`);
+  return `${vendor}-${product}-${idHash}`;
+}
+
+function getBatteryStatus(gamepad) {
+  if (!gamepad) return null;
+
+  if (typeof gamepad.battery === 'number') {
+    return {
+      level: Math.max(0, Math.min(1, gamepad.battery)),
+      charging: Boolean(gamepad.charging),
+    };
+  }
+
+  const id = gamepad.id || '';
+  if (/charging/i.test(id)) {
+    return { level: null, charging: true, unknown: true };
+  }
+
+  return null;
+}
+
+function formatBatteryStatus(gamepad) {
+  const battery = getBatteryStatus(gamepad);
+  if (!battery) return '—';
+  if (battery.unknown) return battery.charging ? 'Lädt' : '—';
+  if (battery.level === null) return '—';
+
+  const percent = Math.round(battery.level * 100);
+  if (battery.charging) return `${percent}% (lädt)`;
+  return `${percent}%`;
+}
+
+function getControllerIconType(type) {
+  if (type === 'xbox') return 'xbox';
+  if (type === 'dualsense' || type === 'dualshock4') return 'playstation';
+  if (type === 'switchpro' || type === 'nintendo' || type === 'joycon2') return 'switch';
+  return 'generic';
+}
+
+function getAllRealGamepads() {
+  if (!navigator.getGamepads) return [];
+  return Array.from(navigator.getGamepads())
+    .filter(Boolean)
+    .filter((gamepad) => !isVirtualGamepad(gamepad));
+}
+
+function getMappingForProfile(profile = 'standard') {
+  return profile === 'alternative'
+    ? { ...ALTERNATIVE_MAPPING }
+    : { ...STANDARD_MAPPING };
+}
+
+function loadControllerSetupConfig() {
+  try {
+    const raw = localStorage.getItem(CONTROLLER_SETUP_STORAGE_KEY);
+    if (!raw) return structuredClone(DEFAULT_CONTROLLER_SETUP);
+
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_CONTROLLER_SETUP,
+      ...parsed,
+      global: {
+        ...DEFAULT_CONTROLLER_SETUP.global,
+        ...(parsed.global || {}),
+      },
+      controllers: Array.isArray(parsed.controllers) ? parsed.controllers : [],
+    };
+  } catch (err) {
+    console.warn('[Gamepad] Controller-Setup konnte nicht geladen werden:', err);
+    return structuredClone(DEFAULT_CONTROLLER_SETUP);
+  }
+}
+
+function saveControllerSetupConfig(config) {
+  localStorage.setItem(CONTROLLER_SETUP_STORAGE_KEY, JSON.stringify(config));
+}
+
+function resolvePlayerOneGamepad(config = loadControllerSetupConfig(), gamepads = getAllRealGamepads()) {
+  if (gamepads.length === 0) return null;
+
+  const connectedByKey = new Map(gamepads.map((gamepad) => [getGamepadKey(gamepad), gamepad]));
+  const orderedEntries = (config.controllers || [])
+    .map((entry) => ({ entry, gamepad: connectedByKey.get(entry.key) }))
+    .filter(({ gamepad }) => Boolean(gamepad));
+
+  if (orderedEntries.length > 0) {
+    const prioritized = orderedEntries.find(({ entry }) => entry.prioritizePlayer1);
+    return prioritized?.gamepad || orderedEntries[0].gamepad;
+  }
+
+  const best = gamepads.reduce((currentBest, gamepad) => {
+    if (!currentBest) return gamepad;
+    return scoreGamepad(gamepad) > scoreGamepad(currentBest) ? gamepad : currentBest;
+  }, null);
+
+  return best || gamepads[0];
+}
+
 class GamepadManager {
   constructor(options = {}) {
-    this.deadzone = options.deadzone ?? 0.35;
+    this.setupConfig = loadControllerSetupConfig();
+    this.deadzone = options.deadzone ?? this.setupConfig.global.deadzone ?? 0.35;
     this.repeatDelay = options.repeatDelay ?? 280;
     this.buttonDebounce = options.buttonDebounce ?? 220;
-    this.mapping = { ...STANDARD_MAPPING, ...options.mapping };
+    this.mapping = {
+      ...getMappingForProfile(this.setupConfig.global.mappingProfile),
+      ...options.mapping,
+    };
 
     this.callbacks = {
       onConnect: options.onConnect || (() => {}),
@@ -64,6 +228,7 @@ class GamepadManager {
       onNavigate: options.onNavigate || (() => {}),
       onAction: options.onAction || (() => {}),
       onInputModeChange: options.onInputModeChange || (() => {}),
+      onSetupChange: options.onSetupChange || (() => {}),
     };
 
     this.enabled = true;
@@ -93,6 +258,7 @@ class GamepadManager {
     window.addEventListener('gamepaddisconnected', this.handleDisconnected);
     window.addEventListener('mousemove', this.handleMouseMove, { passive: true });
     this.scanConnectedGamepads();
+    this.applySetupConfig(this.setupConfig, { silent: true });
     this.frameId = requestAnimationFrame(this.loop);
   }
 
@@ -116,6 +282,38 @@ class GamepadManager {
     this.mapping = { ...this.mapping, ...mapping };
   }
 
+  setDeadzone(deadzone) {
+    this.deadzone = deadzone;
+  }
+
+  getDeadzone() {
+    return this.deadzone;
+  }
+
+  getSetupConfig() {
+    return this.setupConfig;
+  }
+
+  applySetupConfig(config, { silent = false } = {}) {
+    this.setupConfig = {
+      ...DEFAULT_CONTROLLER_SETUP,
+      ...config,
+      global: {
+        ...DEFAULT_CONTROLLER_SETUP.global,
+        ...(config?.global || {}),
+      },
+      controllers: Array.isArray(config?.controllers) ? config.controllers : [],
+    };
+
+    this.deadzone = this.setupConfig.global.deadzone ?? 0.35;
+    this.setMapping(getMappingForProfile(this.setupConfig.global.mappingProfile));
+    this.selectBestGamepad();
+
+    if (!silent) {
+      this.callbacks.onSetupChange(this.setupConfig);
+    }
+  }
+
   handleConnected(event) {
     const gamepad = event.gamepad;
     this.connectedIndexes.add(gamepad.index);
@@ -137,8 +335,6 @@ class GamepadManager {
     this.connectedIndexes.delete(event.gamepad.index);
     this.buttonPressed.clear();
     this.activeNavigationDirection = null;
-
-    // Falls ein anderes echtes Gamepad noch da ist, Wechsel auf dieses.
     this.selectBestGamepad();
 
     if (!isVirtualGamepad(event.gamepad)) {
@@ -147,24 +343,8 @@ class GamepadManager {
   }
 
   selectBestGamepad() {
-    const gamepads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
-    let best = null;
-    let bestScore = -1;
-
-    for (const gamepad of gamepads) {
-      if (!gamepad) continue;
-      const score = scoreGamepad(gamepad);
-      if (score > bestScore) {
-        best = gamepad;
-        bestScore = score;
-      }
-    }
-
-    if (best) {
-      this.activeGamepadIndex = best.index;
-    } else {
-      this.activeGamepadIndex = null;
-    }
+    const playerOne = resolvePlayerOneGamepad(this.setupConfig);
+    this.activeGamepadIndex = playerOne ? playerOne.index : null;
   }
 
   handleMouseMove() {
@@ -216,20 +396,13 @@ class GamepadManager {
       if (current && !isVirtualGamepad(current)) return current;
     }
 
-    // Aktive Auswahl ist weg oder virtuell -> bestes echtes Gamepad waehlen.
-    let best = null;
-    let bestScore = -1;
-    for (const gamepad of gamepads) {
-      if (!gamepad) continue;
-      const score = scoreGamepad(gamepad);
-      if (score > bestScore) {
-        best = gamepad;
-        bestScore = score;
-      }
-    }
+    const playerOne = resolvePlayerOneGamepad(this.setupConfig, getAllRealGamepads());
+    this.activeGamepadIndex = playerOne ? playerOne.index : null;
+    return playerOne;
+  }
 
-    this.activeGamepadIndex = best ? best.index : null;
-    return best;
+  getConnectedGamepads() {
+    return getAllRealGamepads();
   }
 
   pollGamepad(gamepad) {
@@ -260,7 +433,6 @@ class GamepadManager {
       return;
     }
 
-    // Halte-Repeat: bei dauerhaftem Druecken mit repeatDelay wiederholen.
     if (now - this.lastNavigationAt >= this.repeatDelay) {
       this.lastNavigationAt = now;
       this.emitNavigation(direction);
@@ -278,9 +450,6 @@ class GamepadManager {
     if (this.isButtonPressed(gamepad, this.mapping.dpadLeft)) return 'left';
     if (this.isButtonPressed(gamepad, this.mapping.dpadRight)) return 'right';
 
-    // Fallback fuer non-standard Mappings: D-Pad ueber Achse 9 (Hat Switch)
-    // Werte ca: -1=up, -0.71=up-right, -0.43=right, -0.14=down-right,
-    //           0.14=down, 0.43=down-left, 0.71=left, 1=up-left
     if (gamepad.mapping !== 'standard' && gamepad.axes.length > NONSTANDARD_DPAD_AXIS) {
       const hat = gamepad.axes[NONSTANDARD_DPAD_AXIS];
       const hatDirection = decodeHatSwitch(hat);
@@ -336,13 +505,16 @@ class GamepadManager {
     this.inputMode = mode;
     this.callbacks.onInputModeChange(mode);
   }
+
+  isAnyButtonPressed(gamepad) {
+    if (!gamepad?.buttons) return false;
+    return gamepad.buttons.some((button) => {
+      if (typeof button === 'number') return button > 0.5;
+      return Boolean(button?.pressed) || (button?.value || 0) > 0.5;
+    });
+  }
 }
 
-// HID Hat-Switch decodieren. Chromium liefert auf nicht-standard Mappings
-// einen Achsenwert mit 8 Richtungen + "released":
-//   -1.000 up         -0.714 up-right   -0.428 right    -0.142 down-right
-//    0.142 down        0.428 down-left   0.714 left      1.000 up-left
-//   ~1.286 released
 function decodeHatSwitch(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return null;
   if (value > 1.1) return null;
@@ -350,13 +522,13 @@ function decodeHatSwitch(value) {
   const tolerance = 0.15;
   const directions = [
     { value: -1.0, dir: 'up' },
-    { value: -0.714, dir: 'up' },     // up-right -> als "up" behandeln
+    { value: -0.714, dir: 'up' },
     { value: -0.428, dir: 'right' },
-    { value: -0.142, dir: 'down' },   // down-right -> als "down"
+    { value: -0.142, dir: 'down' },
     { value: 0.142, dir: 'down' },
-    { value: 0.428, dir: 'down' },    // down-left -> als "down"
+    { value: 0.428, dir: 'down' },
     { value: 0.714, dir: 'left' },
-    { value: 1.0, dir: 'up' },        // up-left -> als "up"
+    { value: 1.0, dir: 'up' },
   ];
 
   for (const candidate of directions) {
@@ -369,3 +541,22 @@ function decodeHatSwitch(value) {
 }
 
 window.GamepadManager = GamepadManager;
+window.GamepadUtils = {
+  CONTROLLER_SETUP_STORAGE_KEY,
+  DEFAULT_CONTROLLER_SETUP,
+  STANDARD_MAPPING,
+  ALTERNATIVE_MAPPING,
+  isVirtualGamepad,
+  scoreGamepad,
+  parseControllerInfo,
+  describeGamepad,
+  getGamepadKey,
+  getBatteryStatus,
+  formatBatteryStatus,
+  getControllerIconType,
+  getAllRealGamepads,
+  getMappingForProfile,
+  loadControllerSetupConfig,
+  saveControllerSetupConfig,
+  resolvePlayerOneGamepad,
+};

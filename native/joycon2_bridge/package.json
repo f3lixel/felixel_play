@@ -1,0 +1,7 @@
+{
+  "name": "joycon2_bridge",
+  "version": "1.0.0",
+  "private": true,
+  "gypfile": true,
+  "main": "index.js"
+}

@@ -6,17 +6,23 @@
   "scripts": {
     "tw:build": "npx @tailwindcss/cli -i ./tailwind.input.css -o ./tailwind.css --minify",
     "tw:watch": "npx @tailwindcss/cli -i ./tailwind.input.css -o ./tailwind.css --watch",
+    "build:native": "node-gyp rebuild --directory native/joycon2_bridge",
+    "rebuild:native": "electron-rebuild -f -w joycon2_bridge -m native/joycon2_bridge",
+    "postinstall": "npm run rebuild:native",
     "start": "npm run tw:build && electron ."
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
     "@tailwindcss/cli": "^4.3.0",
     "autoprefixer": "^10.5.0",
     "electron": "^41.2.2",
+    "node-addon-api": "^8.8.0",
+    "node-gyp": "^11.5.0",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.3.0"
   },
   "dependencies": {
-    "gsap": "^3.15.0",
-    "node-hid": "^3.3.0"
+    "@kmamal/sdl": "^0.11.13",
+    "gsap": "^3.15.0"
   }
 }

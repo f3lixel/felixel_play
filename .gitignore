@@ -1,4 +1,5 @@
 node_modules/
+node_modules(1)/
 emulators/**/*
 !emulators/README.md
 !emulators/dolphin/

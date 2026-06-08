@@ -59,13 +59,34 @@ function getProfile(controllerInfo) {
   return CONTROLLER_PROFILES[controllerInfo.type] || CONTROLLER_PROFILES.generic;
 }
 
+function getConfiguredControllers(controllerInfo) {
+  const setupControllers = controllerInfo?.setup?.controllers;
+  if (Array.isArray(setupControllers) && setupControllers.length > 0) {
+    return setupControllers
+      .slice(0, 4)
+      .sort((a, b) => Number(a.playerSlot || 1) - Number(b.playerSlot || 1))
+      .map((entry, index) => ({
+        entry,
+        slot: Number(entry.playerSlot) || index + 1,
+        profile: CONTROLLER_PROFILES[entry.type] || CONTROLLER_PROFILES.generic,
+      }));
+  }
+
+  const profile = getProfile(controllerInfo);
+  return profile ? [{ entry: controllerInfo, slot: controllerInfo.playerSlot || 1, profile }] : [];
+}
+
+function getControllerSetting(entry, setup, key, fallback) {
+  return entry?.[key] ?? setup?.global?.[key] ?? fallback;
+}
+
 // =====================================================================
 // RYUJINX
 // =====================================================================
 
 function applyRyujinxController(controllerInfo) {
-  const profile = getProfile(controllerInfo);
-  if (!profile) return { applied: false, reason: 'no-controller' };
+  const controllers = getConfiguredControllers(controllerInfo);
+  if (controllers.length === 0) return { applied: false, reason: 'no-controller' };
 
   const configPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Ryujinx', 'Config.json');
   if (!fs.existsSync(configPath)) {
@@ -86,19 +107,18 @@ function applyRyujinxController(controllerInfo) {
     return { applied: false, reason: `parse-failed: ${err.message}` };
   }
 
-  const player1 = buildRyujinxPlayer1(profile);
+  const playerEntries = controllers.map(({ profile, slot, entry }) => (
+    buildRyujinxPlayer(profile, slot, entry, controllerInfo?.setup)
+  ));
 
   if (!Array.isArray(config.input_config)) {
     config.input_config = [];
   }
 
-  // Bestehenden Player1-Eintrag ersetzen oder hinzufuegen.
-  const existingIndex = config.input_config.findIndex((entry) => entry?.player_index === 'Player1');
-  if (existingIndex >= 0) {
-    config.input_config[existingIndex] = player1;
-  } else {
-    config.input_config.unshift(player1);
-  }
+  // Bestehende Felixel-Player-Slots ersetzen, andere Emulator-Settings unangetastet lassen.
+  const felixelPlayers = new Set(['Player1', 'Player2', 'Player3', 'Player4']);
+  config.input_config = config.input_config.filter((entry) => !felixelPlayers.has(entry?.player_index));
+  config.input_config.unshift(...playerEntries);
 
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
@@ -106,10 +126,13 @@ function applyRyujinxController(controllerInfo) {
     return { applied: false, reason: `write-failed: ${err.message}` };
   }
 
-  return { applied: true, profile: profile.label, path: configPath };
+  return { applied: true, profile: `${controllers.length} Controller`, path: configPath };
 }
 
-function buildRyujinxPlayer1(profile) {
+function buildRyujinxPlayer(profile, slot = 1, entry = {}, setup = {}) {
+  const deadzone = Number(getControllerSetting(entry, setup, 'deadzone', 0.1));
+  const vibration = Number(getControllerSetting(entry, setup, 'vibrationStrength', 1));
+
   return {
     left_joycon_stick: {
       joystick: 'Left',
@@ -125,8 +148,8 @@ function buildRyujinxPlayer1(profile) {
       rotate90_cw: false,
       stick_button: 'RightStick',
     },
-    deadzone_left: 0.1,
-    deadzone_right: 0.1,
+    deadzone_left: deadzone,
+    deadzone_right: deadzone,
     range_left: 1,
     range_right: 1,
     trigger_threshold: 0.5,
@@ -137,9 +160,9 @@ function buildRyujinxPlayer1(profile) {
       enable_motion: true,
     },
     rumble: {
-      strong_rumble: 1,
-      weak_rumble: 1,
-      enable_rumble: false,
+      strong_rumble: vibration,
+      weak_rumble: vibration,
+      enable_rumble: vibration > 0,
     },
     led: {
       enable_led: false,
@@ -174,7 +197,7 @@ function buildRyujinxPlayer1(profile) {
     id: profile.sdl3Id,
     name: profile.sdl3Name,
     controller_type: profile.ryujinxControllerType,
-    player_index: 'Player1',
+    player_index: `Player${slot}`,
   };
 }
 
@@ -205,43 +228,50 @@ function buildSudachiMotion(guid, motion, port = 0) {
   return `"engine:sdl,guid:${guid},port:${port},motion:${motion}"`;
 }
 
-function getSudachiPlayer0Settings(guid) {
+function getSudachiPlayerSettings(guid, playerIndex, entry = {}, setup = {}) {
+  const prefix = `player_${playerIndex}`;
+  const deadzone = Number(getControllerSetting(entry, setup, 'deadzone', 0.1)).toFixed(6);
   // Standard SDL Game Controller Mapping (entspricht "South=0, East=1, West=2, North=3, ...")
   return {
-    'player_0_button_a': buildSudachiButton(guid, 0),
-    'player_0_button_b': buildSudachiButton(guid, 1),
-    'player_0_button_x': buildSudachiButton(guid, 2),
-    'player_0_button_y': buildSudachiButton(guid, 3),
-    'player_0_button_lstick': buildSudachiButton(guid, 7),
-    'player_0_button_rstick': buildSudachiButton(guid, 8),
-    'player_0_button_l': buildSudachiButton(guid, 9),
-    'player_0_button_r': buildSudachiButton(guid, 10),
-    'player_0_button_zl': buildSudachiAxis(guid, 4, 0, 0.5, '+'),
-    'player_0_button_zr': buildSudachiAxis(guid, 5, 0, 0.5, '+'),
-    'player_0_button_plus': buildSudachiButton(guid, 6),
-    'player_0_button_minus': buildSudachiButton(guid, 4),
-    'player_0_button_dleft': buildSudachiButton(guid, 13),
-    'player_0_button_dup': buildSudachiButton(guid, 11),
-    'player_0_button_dright': buildSudachiButton(guid, 14),
-    'player_0_button_ddown': buildSudachiButton(guid, 12),
-    'player_0_button_sl': '""',
-    'player_0_button_sr': '""',
-    'player_0_button_home': buildSudachiButton(guid, 5),
-    'player_0_button_screenshot': '""',
-    'player_0_button_slleft': '""',
-    'player_0_button_srleft': '""',
-    'player_0_button_slright': '""',
-    'player_0_button_srright': '""',
-    'player_0_lstick': buildSudachiStick(guid, 'left'),
-    'player_0_rstick': buildSudachiStick(guid, 'right'),
-    'player_0_motionleft': buildSudachiMotion(guid, 0),
-    'player_0_motionright': buildSudachiMotion(guid, 1),
+    [`${prefix}_button_a`]: buildSudachiButton(guid, 0, playerIndex),
+    [`${prefix}_button_b`]: buildSudachiButton(guid, 1, playerIndex),
+    [`${prefix}_button_x`]: buildSudachiButton(guid, 2, playerIndex),
+    [`${prefix}_button_y`]: buildSudachiButton(guid, 3, playerIndex),
+    [`${prefix}_button_lstick`]: buildSudachiButton(guid, 7, playerIndex),
+    [`${prefix}_button_rstick`]: buildSudachiButton(guid, 8, playerIndex),
+    [`${prefix}_button_l`]: buildSudachiButton(guid, 9, playerIndex),
+    [`${prefix}_button_r`]: buildSudachiButton(guid, 10, playerIndex),
+    [`${prefix}_button_zl`]: buildSudachiAxis(guid, 4, playerIndex, 0.5, '+'),
+    [`${prefix}_button_zr`]: buildSudachiAxis(guid, 5, playerIndex, 0.5, '+'),
+    [`${prefix}_button_plus`]: buildSudachiButton(guid, 6, playerIndex),
+    [`${prefix}_button_minus`]: buildSudachiButton(guid, 4, playerIndex),
+    [`${prefix}_button_dleft`]: buildSudachiButton(guid, 13, playerIndex),
+    [`${prefix}_button_dup`]: buildSudachiButton(guid, 11, playerIndex),
+    [`${prefix}_button_dright`]: buildSudachiButton(guid, 14, playerIndex),
+    [`${prefix}_button_ddown`]: buildSudachiButton(guid, 12, playerIndex),
+    [`${prefix}_button_sl`]: '""',
+    [`${prefix}_button_sr`]: '""',
+    [`${prefix}_button_home`]: buildSudachiButton(guid, 5, playerIndex),
+    [`${prefix}_button_screenshot`]: '""',
+    [`${prefix}_button_slleft`]: '""',
+    [`${prefix}_button_srleft`]: '""',
+    [`${prefix}_button_slright`]: '""',
+    [`${prefix}_button_srright`]: '""',
+    [`${prefix}_lstick`]: buildSudachiStickWithDeadzone(guid, 'left', playerIndex, deadzone),
+    [`${prefix}_rstick`]: buildSudachiStickWithDeadzone(guid, 'right', playerIndex, deadzone),
+    [`${prefix}_motionleft`]: buildSudachiMotion(guid, 0, playerIndex),
+    [`${prefix}_motionright`]: buildSudachiMotion(guid, 1, playerIndex),
   };
 }
 
+function buildSudachiStickWithDeadzone(guid, stick, port, deadzone) {
+  const axes = stick === 'left' ? { x: 0, y: 1 } : { x: 2, y: 3 };
+  return `"engine:sdl,guid:${guid},port:${port},axis_x:${axes.x},axis_y:${axes.y},offset_x:-0.000000,offset_y:-0.000000,invert_x:+,invert_y:+,deadzone:${deadzone},range:1.000000"`;
+}
+
 function applySudachiController(controllerInfo) {
-  const profile = getProfile(controllerInfo);
-  if (!profile) return { applied: false, reason: 'no-controller' };
+  const controllers = getConfiguredControllers(controllerInfo);
+  if (controllers.length === 0) return { applied: false, reason: 'no-controller' };
 
   const configPath = path.join(os.homedir(), 'AppData', 'Roaming', 'sudachi', 'config', 'qt-config.ini');
   if (!fs.existsSync(configPath)) {
@@ -255,14 +285,22 @@ function applySudachiController(controllerInfo) {
     return { applied: false, reason: `read-failed: ${err.message}` };
   }
 
-  const settings = getSudachiPlayer0Settings(profile.sdl2Guid);
+  let settings = {};
+  let baseOverrides = {};
 
-  // Player 1 generelle Flags auf 'Pro Controller, connected, kein default'.
-  const baseOverrides = {
-    'player_0_type': '0', // 0 = Pro Controller
-    'player_0_connected': 'true',
-    'player_0_profile_name': '"FelixelPlay"',
-  };
+  for (const { profile, slot, entry } of controllers) {
+    const playerIndex = Math.max(0, Math.min(3, slot - 1));
+    settings = {
+      ...settings,
+      ...getSudachiPlayerSettings(profile.sdl2Guid, playerIndex, entry, controllerInfo?.setup),
+    };
+    baseOverrides = {
+      ...baseOverrides,
+      [`player_${playerIndex}_type`]: '0', // 0 = Pro Controller
+      [`player_${playerIndex}_connected`]: 'true',
+      [`player_${playerIndex}_profile_name`]: '"FelixelPlay"',
+    };
+  }
 
   let patched = raw;
   for (const [key, value] of Object.entries({ ...settings, ...baseOverrides })) {
@@ -275,7 +313,7 @@ function applySudachiController(controllerInfo) {
     return { applied: false, reason: `write-failed: ${err.message}` };
   }
 
-  return { applied: true, profile: profile.label, path: configPath };
+  return { applied: true, profile: `${controllers.length} Controller`, path: configPath };
 }
 
 // Setzt key=value und key\default=false innerhalb der angegebenen Section.
@@ -436,8 +474,8 @@ function buildDolphinWiimote(profile, padNumber) {
 }
 
 function applyDolphinController(controllerInfo, dolphinExePath) {
-  const profile = getProfile(controllerInfo);
-  if (!profile) return { applied: false, reason: 'no-controller' };
+  const controllers = getConfiguredControllers(controllerInfo);
+  if (controllers.length === 0) return { applied: false, reason: 'no-controller' };
   if (!dolphinExePath || !fs.existsSync(dolphinExePath)) {
     return { applied: false, reason: 'dolphin-missing' };
   }
@@ -445,10 +483,10 @@ function applyDolphinController(controllerInfo, dolphinExePath) {
   const { configDir } = ensureDolphinPortable(dolphinExePath);
 
   const gcPadIni = ['# Generated by felixel play launcher', '']
-    .concat([buildDolphinSdlController(profile, 1)])
+    .concat(controllers.map(({ profile, slot }) => buildDolphinSdlController(profile, slot)))
     .join('\n');
   const wiimoteIni = ['# Generated by felixel play launcher', '']
-    .concat([buildDolphinWiimote(profile, 1)])
+    .concat(controllers.map(({ profile, slot }) => buildDolphinWiimote(profile, slot)))
     .join('\n');
 
   try {
@@ -458,7 +496,7 @@ function applyDolphinController(controllerInfo, dolphinExePath) {
     return { applied: false, reason: `write-failed: ${err.message}` };
   }
 
-  return { applied: true, profile: profile.label, path: configDir };
+  return { applied: true, profile: `${controllers.length} Controller`, path: configDir };
 }
 
 // =====================================================================

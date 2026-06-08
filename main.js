@@ -3,19 +3,22 @@ const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { applyControllerForPlatform } = require('./ControllerSetup');
+const { NativeControllerManager } = require('./NativeControllerManager');
+const { JoyCon2BridgeManager } = require('./JoyCon2BridgeManager');
 
 let mainWindow;
 let overlayWindow = null;
 let launchHideTimer = null;
 let restoreAlwaysOnTopTimer = null;
+let controllerSetupConfig = null;
+let nativeControllerManager = null;
+let joyCon2BridgeManager = null;
 
 // Aktiver Emulator-Prozess – wird beim Spawn gesetzt und beim Exit geleert.
 let activeEmulatorPid = null;
 
-// Hinweis: Die Controller-Eingaben werden komplett ueber die Web Gamepad API
-// im Renderer (siehe GamepadManager.js) verarbeitet. Das ist robuster als
-// node-gamepad, das auf hardkodierte vendor/productIDs angewiesen ist und
-// im Fehlerfall sogar process.exit() aufruft.
+// Controller-Eingaben laufen nativ ueber SDL im Main-Prozess und werden per IPC
+// an Renderer/Overlay weitergereicht. Die Browser Gamepad API bleibt nur Fallback.
 
 function createWindow() {
   const iconPath = path.join(__dirname, 'assets', 'icons', 'app-icon.svg');
@@ -76,9 +79,11 @@ function createOverlayWindow() {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('felixel.play');
+  controllerSetupConfig = loadControllerSetupFromDisk();
   createWindow();
   createOverlayWindow();
-  startDS4Monitor();
+  startNativeControllerMonitor();
+  startJoyCon2Bridge();
 
   globalShortcut.register('Escape', () => {
     app.quit();
@@ -99,7 +104,8 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  stopDS4Monitor();
+  stopNativeControllerMonitor();
+  stopJoyCon2Bridge();
 });
 
 app.on('window-all-closed', () => {
@@ -349,6 +355,55 @@ function buildGameLibrary() {
   return games.sort((a, b) => a.title.localeCompare(b.title, 'de'));
 }
 
+// --- Controller Setup Persistenz ---
+
+function getControllerSetupPath() {
+  return path.join(app.getPath('userData'), 'controller-setup.json');
+}
+
+function loadControllerSetupFromDisk() {
+  const filePath = getControllerSetupPath();
+  if (!fs.existsSync(filePath)) return null;
+
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn(`[ControllerSetup] Konfiguration konnte nicht geladen werden: ${err.message}`);
+    return null;
+  }
+}
+
+function saveControllerSetupToDisk(config) {
+  const filePath = getControllerSetupPath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf-8');
+  controllerSetupConfig = config;
+}
+
+function resolveControllerInfoFromSetup(fallbackControllerInfo) {
+  if (!controllerSetupConfig?.controllers?.length) {
+    return fallbackControllerInfo;
+  }
+
+  const prioritized = controllerSetupConfig.controllers.find((entry) => entry.prioritizePlayer1);
+  const playerOne = prioritized || controllerSetupConfig.controllers[0];
+  if (!playerOne) return fallbackControllerInfo;
+
+  return {
+    id: playerOne.label || fallbackControllerInfo?.id || '',
+    mapping: playerOne.mappingProfile || controllerSetupConfig.global?.mappingProfile || fallbackControllerInfo?.mapping || '',
+    vendorId: playerOne.vendorId || fallbackControllerInfo?.vendorId || '',
+    productId: playerOne.productId || fallbackControllerInfo?.productId || '',
+    type: playerOne.type || fallbackControllerInfo?.type || 'generic',
+    playerSlot: playerOne.playerSlot || 1,
+    mappingProfile: playerOne.mappingProfile || controllerSetupConfig.global?.mappingProfile || fallbackControllerInfo?.mappingProfile || 'standard',
+    deadzone: playerOne.deadzone ?? controllerSetupConfig.global?.deadzone ?? fallbackControllerInfo?.deadzone ?? 0.35,
+    vibrationStrength: playerOne.vibrationStrength ?? controllerSetupConfig.global?.vibrationStrength ?? fallbackControllerInfo?.vibrationStrength ?? 1,
+    setup: controllerSetupConfig,
+  };
+}
+
 // --- IPC Handlers ---
 
 ipcMain.handle('read-games', async () => {
@@ -357,6 +412,71 @@ ipcMain.handle('read-games', async () => {
 
 ipcMain.handle('quit-app', () => {
   app.quit();
+});
+
+ipcMain.handle('save-controller-setup', async (_event, config) => {
+  try {
+    saveControllerSetupToDisk(config);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-controller-setup', async () => {
+  return controllerSetupConfig || loadControllerSetupFromDisk();
+});
+
+ipcMain.handle('get-connected-controllers', async () => {
+  const sdlControllers = nativeControllerManager?.getConnectedControllers() || [];
+  const joyconControllers = joyCon2BridgeManager?.getConnectedControllers() || [];
+  return [...joyconControllers, ...sdlControllers];
+});
+
+ipcMain.handle('get-joycon2-status', async () => ({
+  available: Boolean(joyCon2BridgeManager?.isAvailable()),
+  vigemConnected: Boolean(joyCon2BridgeManager?.isViGEmConnected()),
+  scanState: joyCon2BridgeManager?.getScanState() || 'idle',
+  players: joyCon2BridgeManager?.getConnectedControllers() || [],
+}));
+
+ipcMain.handle('start-joycon2-scan', async (_event, options = {}) => {
+  if (!joyCon2BridgeManager?.isAvailable()) {
+    return { success: false, error: 'JoyCon2 Native Bridge ist nicht verfuegbar.' };
+  }
+
+  const mode = options.mode || 'single';
+  try {
+    if (mode === 'dual-first') {
+      joyCon2BridgeManager.startScanDualFirst(options);
+    } else if (mode === 'dual-second') {
+      joyCon2BridgeManager.startScanDualSecond();
+    } else if (mode === 'pro') {
+      joyCon2BridgeManager.startScanPro(options);
+    } else {
+      joyCon2BridgeManager.startScanSingle(options);
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('stop-joycon2-scan', async () => {
+  joyCon2BridgeManager?.stopScan();
+  return { success: true };
+});
+
+ipcMain.handle('disconnect-joycon2', async (_event, playerId) => {
+  if (!joyCon2BridgeManager?.isAvailable()) {
+    return { success: false, error: 'JoyCon2 Native Bridge ist nicht verfuegbar.' };
+  }
+  if (playerId) {
+    joyCon2BridgeManager.disconnectPlayer(playerId);
+  } else {
+    joyCon2BridgeManager.disconnectAll();
+  }
+  return { success: true };
 });
 
 ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator, launchPath, controllerInfo }) => {
@@ -387,7 +507,8 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator, laun
   let lastError = null;
 
   for (const entry of availableEntries) {
-    const result = await launchEmulatorEntry(entry, { platform, controllerInfo });
+    const resolvedControllerInfo = resolveControllerInfoFromSetup(controllerInfo);
+    const result = await launchEmulatorEntry(entry, { platform, controllerInfo: resolvedControllerInfo });
     if (result.success) {
       return result;
     }
@@ -402,6 +523,64 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator, laun
     error: `Alle Emulatoren wurden sofort beendet. Letzter Fehler: ${lastError || 'unbekannt'}`,
   };
 });
+
+// --- Native Controller IPC ---
+
+function broadcastControllerInput(payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send('controller-input', payload);
+  }
+}
+
+function handleControllerInput(payload) {
+  broadcastControllerInput(payload);
+
+  if (
+    activeEmulatorPid !== null
+    && payload.type === 'button-down'
+    && payload.logicalButton === 'guide'
+  ) {
+    console.log(`[Overlay] ${payload.button}-Taste (${payload.controllerType}/${payload.source || 'sdl'}) - Overlay wird eingeblendet`);
+    bringOverlayToFront();
+  }
+}
+
+function handleNativeControllerInput(payload) {
+  handleControllerInput(payload);
+}
+
+function startNativeControllerMonitor() {
+  nativeControllerManager = new NativeControllerManager({
+    onInput: handleNativeControllerInput,
+  });
+
+  const started = nativeControllerManager.start();
+  if (!started) {
+    console.warn('[Controller] Native SDL-Unterstuetzung ist nicht aktiv. Renderer-Fallback bleibt verfuegbar.');
+  }
+}
+
+function stopNativeControllerMonitor() {
+  nativeControllerManager?.stop();
+  nativeControllerManager = null;
+}
+
+function startJoyCon2Bridge() {
+  joyCon2BridgeManager = new JoyCon2BridgeManager({
+    onInput: handleControllerInput,
+  });
+
+  const started = joyCon2BridgeManager.start();
+  if (!started) {
+    console.warn('[JoyCon2] BLE/ViGEm-Bridge ist nicht aktiv (Build oder ViGEmBus pruefen).');
+  }
+}
+
+function stopJoyCon2Bridge() {
+  joyCon2BridgeManager?.stop();
+  joyCon2BridgeManager = null;
+}
 
 // --- Overlay-Helfer ---
 
@@ -453,136 +632,8 @@ ipcMain.handle('overlay-open-settings', () => {
   mainWindow?.webContents.send('open-settings');
 });
 
-// --- DualShock-4 HID Hintergrund-Monitor ---
-
-// Sony Vendor-ID und bekannte DS4 Product-IDs
-const DS4_VENDOR_ID = 0x054c;
-const DS4_PRODUCT_IDS = new Set([0x05c4, 0x09cc, 0x0ba0]);
-
-let ds4Device = null;
-let ds4PsButtonPrev = false;
-let ds4RetryTimer = null;
-
-function onPsButtonPressed() {
-  // Nur reagieren, wenn gerade ein Emulator laeuft
-  if (activeEmulatorPid === null) return;
-  console.log('[DS4] PS-Taste – Overlay wird eingeblendet');
-  bringOverlayToFront();
-}
-
-function tryOpenDS4() {
-  if (ds4Device) return;
-
-  let HID;
-  try {
-    HID = require('node-hid');
-  } catch (err) {
-    console.warn('[DS4] node-hid nicht ladbar:', err.message);
-    return;
-  }
-
-  // Alle DS4-Interfaces einsammeln (Controller kann mehrere HID-Paths liefern)
-  let candidates;
-  try {
-    candidates = HID.devices().filter(
-      d => d.vendorId === DS4_VENDOR_ID && DS4_PRODUCT_IDS.has(d.productId)
-    );
-  } catch (err) {
-    console.warn('[DS4] Geraetesuche fehlgeschlagen:', err.message);
-    return;
-  }
-
-  if (candidates.length === 0) return;
-
-  console.log(`[DS4] ${candidates.length} Interface(s) gefunden – versuche Oeffnen…`);
-
-  // Erstes oeffenbares Interface verwenden
-  for (const deviceInfo of candidates) {
-    try {
-      const device = new HID.HID(deviceInfo.path);
-      ds4Device = device;
-
-      const label = `${deviceInfo.product || 'Wireless Controller'} (usage=${deviceInfo.usagePage}/${deviceInfo.usage})`;
-      console.log(`[DS4] HID-Monitor aktiv: ${label}`);
-
-      // Die ersten 3 Reports in den Log schreiben, damit der Byte-Offset
-      // sichtbar ist – hilft bei Diagnosebedarf.
-      let diagCount = 0;
-
-      device.on('data', (data) => {
-        if (diagCount < 3) {
-          const hex = Array.from(data.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          console.log(`[DS4] Report #${diagCount} ID=0x${data[0].toString(16)} [${hex}]`);
-          diagCount++;
-        }
-
-        // DS4 schickt je nach Verbindungstyp unterschiedliche Report-IDs:
-        //   0x01  – USB oder Bluetooth Standard-HID  → PS-Taste: Byte 7 Bit 0
-        //   0x11  – Bluetooth Extended Mode          → PS-Taste: Byte 9 Bit 0
-        let psPressed;
-        if (data[0] === 0x11) {
-          psPressed = (data[9] & 0x01) !== 0;
-        } else {
-          psPressed = (data[7] & 0x01) !== 0;
-        }
-
-        if (psPressed && !ds4PsButtonPrev) {
-          // Steigende Flanke: Taste gerade eben erst gedrueckt
-          onPsButtonPressed();
-        }
-        ds4PsButtonPrev = psPressed;
-      });
-
-      device.on('error', (err) => {
-        console.warn(`[DS4] Verbindung verloren: ${err.message}`);
-        ds4Device = null;
-        ds4PsButtonPrev = false;
-        scheduleDs4Retry();
-      });
-
-      break; // Erstes funktionierendes Interface reicht
-    } catch (err) {
-      console.warn(`[DS4] Interface nicht oeffenbar (${deviceInfo.path}): ${err.message}`);
-    }
-  }
-}
-
-function scheduleDs4Retry() {
-  if (ds4RetryTimer) return;
-  ds4RetryTimer = setInterval(() => {
-    tryOpenDS4();
-    if (ds4Device) {
-      clearInterval(ds4RetryTimer);
-      ds4RetryTimer = null;
-    }
-  }, 5000);
-}
-
-function startDS4Monitor() {
-  tryOpenDS4();
-  if (!ds4Device) {
-    scheduleDs4Retry();
-  }
-}
-
-function stopDS4Monitor() {
-  if (ds4RetryTimer) {
-    clearInterval(ds4RetryTimer);
-    ds4RetryTimer = null;
-  }
-  if (ds4Device) {
-    try { ds4Device.close(); } catch (_) {}
-    ds4Device = null;
-  }
-}
-
 function applyControllerForEntry(entry, platform, controllerInfo) {
   if (!controllerInfo) {
-    return;
-  }
-
-  if (entry.emulator === 'ryujinxCanary') {
-    console.log('[ControllerSetup] Ryujinx wird nicht automatisch gepatcht, damit die Emulator-Konfiguration stabil bleibt.');
     return;
   }
 
@@ -631,8 +682,7 @@ function launchEmulatorEntry(entry, { platform, controllerInfo }) {
       settled = true;
       child.unref();
       activeEmulatorPid = child.pid;
-      console.log(`[Overlay] Emulator laeuft – PID ${child.pid}, PS-Taste aktiv`);
-      tryOpenDS4();
+      console.log(`[Overlay] Emulator laeuft – PID ${child.pid}, Guide/Home-Taste aktiv`);
       resolve({ success: true });
     }
 
@@ -693,7 +743,7 @@ function launchEmulatorEntry(entry, { platform, controllerInfo }) {
     child.once('exit', (code, signal) => {
       console.log(`${entry.label} beendet: code=${code} signal=${signal}`);
       activeEmulatorPid = null;
-      console.log('[Overlay] Emulator beendet – PS-Taste deaktiviert');
+      console.log('[Overlay] Emulator beendet – Guide/Home-Taste deaktiviert');
 
       restoreLauncherWindow();
 

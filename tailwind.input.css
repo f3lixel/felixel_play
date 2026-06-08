@@ -2,3 +2,5 @@
 
 @source "./index.html";
 @source "./renderer.js";
+@source "./ControllerSetupUI.js";
+@source "./GamepadManager.js";
