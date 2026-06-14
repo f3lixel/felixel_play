@@ -49,7 +49,7 @@
       </div>
       <div class="ps5-topbar-right">
         <span id="dateDisplay" class="ps5-date"></span>
-        <div class="ps5-ctrl-status">
+        <div class="ps5-ctrl-status" id="ctrlStatusTrigger" role="button" tabindex="0" aria-label="Controller-Einrichtung öffnen" title="Controller-Einrichtung">
           <div class="ps5-ctrl-item">
             <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
               <rect x="2" y="6" width="20" height="12" rx="6"/>
@@ -96,24 +96,24 @@
   <main class="shelf-container" id="shelfContainer">
     <!-- System-Icons direkt über der Kategorienleiste -->
     <div class="ps5-sys-icons">
-      <button class="ps5-sys-btn has-dot" type="button" aria-label="Aktivitäten" id="btnActivities">
+      <button class="ps5-sys-btn has-dot" type="button" aria-label="Aktivitäten" id="btnActivities" tabindex="0">
         <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
           <path d="M21 3H3c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h5v2h8v-2h5c1.11 0 1.99-.89 1.99-2L23 5c0-1.11-.89-2-2-2zm0 14H3V5h18v12z"/>
         </svg>
       </button>
-      <button class="ps5-sys-btn has-dot" id="btnController" type="button" aria-label="Controller Setup">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
+      <button class="ps5-sys-btn" type="button" aria-label="Controller-Einrichtung" id="btnControllerSetup" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
           <rect x="2" y="6" width="20" height="12" rx="6"/>
-          <circle cx="7" cy="12" r="1.5" fill="currentColor" stroke="none"/>
-          <circle cx="5" cy="10" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="5" cy="14" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="9" cy="14" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="16" cy="10.5" r="1.5" fill="currentColor" stroke="none"/>
-          <circle cx="16" cy="13.5" r="1.5" fill="currentColor" stroke="none"/>
+          <circle cx="7" cy="12" r="1.6" fill="#0b0b0b"/>
+          <circle cx="5" cy="10" r="1.1" fill="#0b0b0b"/>
+          <circle cx="9" cy="10" r="1.1" fill="#0b0b0b"/>
+          <circle cx="5" cy="14" r="1.1" fill="#0b0b0b"/>
+          <circle cx="9" cy="14" r="1.1" fill="#0b0b0b"/>
+          <circle cx="16" cy="10.5" r="1.6" fill="#0b0b0b"/>
+          <circle cx="16" cy="13.5" r="1.6" fill="#0b0b0b"/>
         </svg>
       </button>
-      <button class="ps5-sys-btn" type="button" aria-label="Ausschalten" id="btnPower">
+      <button class="ps5-sys-btn" type="button" aria-label="Ausschalten" id="btnPower" tabindex="0">
         <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
           <path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/>
         </svg>
@@ -137,126 +137,46 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <!-- Controller Setup Overlay -->
-  <div id="controllerOverlay" class="controller-overlay hidden" role="dialog" aria-modal="true" aria-label="Controller Setup">
-    <div class="controller-overlay-panel controller-setup-panel">
-      <button class="controller-overlay-close" id="btnControllerClose" type="button" aria-label="Schließen" data-controller-focus>
-        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-          <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-        </svg>
-      </button>
+  <!-- Controller Setup Modal -->
+  <div id="controller-setup-modal" class="controller-modal hidden" role="dialog" aria-modal="true" aria-labelledby="controllerModalTitle" aria-hidden="true" data-view="dashboard">
+    <div class="controller-modal__backdrop" data-controller-close></div>
+    <div class="controller-modal__panel" role="document">
+      <h2 id="controllerModalTitle" class="sr-only">Controller-Verbindungsstatus</h2>
 
-      <div class="controller-setup-shell">
-        <aside class="controller-setup-nav" aria-label="Controller Setup Navigation">
-          <button id="btnControllerViewDashboard" class="controller-nav-btn is-active" type="button" data-view="dashboard" data-controller-focus>Dashboard</button>
-          <button id="btnControllerViewConnect" class="controller-nav-btn" type="button" data-view="connect" data-controller-focus>Gerät verbinden</button>
-          <button id="btnControllerViewMapping" class="controller-nav-btn" type="button" data-view="mapping" data-controller-focus>Tastenbelegung</button>
-        </aside>
+      <aside class="controller-modal__sidebar">
+        <button class="controller-nav is-active" type="button" data-controller-view="dashboard">Dashboard</button>
+        <button class="controller-nav" type="button" data-controller-view="connect">
+          <span>Gerät verbinden</span>
+          <span class="controller-nav__plus" aria-hidden="true">+</span>
+        </button>
+      </aside>
 
-        <div class="controller-setup-main">
-          <div class="controller-setup-views">
-            <div id="controllerViewDashboard" class="controller-view is-active">
-              <div class="controller-figma-stage">
-                <div id="controllerSlots" class="controller-figma-slots" role="list">
-                  <button type="button" class="controller-figma-card controller-figma-card--empty" data-slot="1" aria-label="Player 1: frei" data-controller-focus>
-                    <span class="controller-figma-pnum controller-figma-pnum--empty">P1</span>
-                    <span class="controller-figma-triangles">
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="controller-figma-state">FREE</span>
-                  </button>
-                  <button type="button" class="controller-figma-card controller-figma-card--empty" data-slot="2" aria-label="Player 2: frei" data-controller-focus>
-                    <span class="controller-figma-pnum controller-figma-pnum--empty">P2</span>
-                    <span class="controller-figma-triangles">
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="controller-figma-state">FREE</span>
-                  </button>
-                  <button type="button" class="controller-figma-card controller-figma-card--empty" data-slot="3" aria-label="Player 3: frei" data-controller-focus>
-                    <span class="controller-figma-pnum controller-figma-pnum--empty">P3</span>
-                    <span class="controller-figma-triangles">
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="controller-figma-state">FREE</span>
-                  </button>
-                  <button type="button" class="controller-figma-card controller-figma-card--empty" data-slot="4" aria-label="Player 4: frei" data-controller-focus>
-                    <span class="controller-figma-pnum controller-figma-pnum--empty">P4</span>
-                    <span class="controller-figma-triangles">
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                      <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M5 1 L9 9 L1 9 Z" fill="none" stroke="#2f2f2f" stroke-width="1.5" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="controller-figma-state">FREE</span>
-                  </button>
-                </div>
-              </div>
-            </div>
+      <div class="controller-modal__main">
+        <button class="controller-modal__close-x" type="button" data-controller-close aria-label="Schließen">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18" aria-hidden="true">
+            <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
 
-            <div id="controllerViewConnect" class="controller-view hidden">
-              <section class="controller-connect-view-card" aria-label="Controller verbinden">
-                <div class="controller-connect-header">
-                  <span class="controller-pairing-label">Gerät verbinden</span>
-                  <h3>Drücke L + R oder eine Taste am Controller</h3>
-                  <p data-controller-status-text>Warte auf Pairing.</p>
-                </div>
+        <ul class="controller-slots" id="controllerSlots" aria-label="Controller-Slots"></ul>
 
-                <div class="controller-connect-actions">
-                  <button id="btnAddController" class="controller-setup-btn" type="button" data-controller-focus>Controller hinzufügen</button>
-                  <button id="btnGoToConnectView" class="controller-setup-btn controller-setup-btn--secondary" type="button" data-controller-focus>Pairing neu starten</button>
-                  <button id="btnBackToDashboard" class="controller-setup-btn controller-setup-btn--gold" type="button" data-controller-focus>Open Dashboard</button>
-                </div>
-
-                <p id="controllerAddHint" class="controller-add-hint hidden" data-controller-add-hint>Warte auf Eingabe vom neuen Controller...</p>
-              </section>
-            </div>
-
-            <div id="controllerViewMapping" class="controller-view hidden">
-              <section class="controller-connect-view-card controller-mapping-view" aria-label="Tastenbelegung">
-                <div class="controller-connect-header">
-                  <span class="controller-pairing-label">Tastenbelegung</span>
-                  <h3>Globale Einstellungen</h3>
-                  <p data-controller-status-text>Standard für neue Controller.</p>
-                </div>
-                <div class="controller-global-grid">
-                  <label class="controller-setting">
-                    <span>Deadzone</span>
-                    <input id="globalDeadzone" type="range" min="0.05" max="0.8" step="0.05" value="0.35" data-controller-focus>
-                    <strong id="globalDeadzoneValue">35%</strong>
-                  </label>
-                  <label class="controller-setting">
-                    <span>Vibration Strength</span>
-                    <input id="globalVibration" type="range" min="0" max="1" step="0.05" value="1" data-controller-focus>
-                    <strong id="globalVibrationValue">100%</strong>
-                  </label>
-                  <label class="controller-setting controller-setting--select">
-                    <span>Button Mapping Profile</span>
-                    <select id="globalMappingProfile" data-controller-focus>
-                      <option value="standard">Standard</option>
-                      <option value="alternative">Alternative</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-            </div>
-          </div>
-          <button id="btnControllerReady" class="controller-ready-btn" type="button" data-controller-focus>
-            <span class="controller-button-pill">A</span>
-            Ready
-          </button>
+        <div class="controller-connect">
+          <img class="controller-connect__art" src="assets/icons/playsi.svg" alt="" aria-hidden="true">
+          <div class="controller-connect__spinner" aria-hidden="true"></div>
+          <p class="controller-connect__title">Gerät verbinden</p>
+          <p class="controller-connect__hint">Bitte drücke eine beliebige Taste auf deinem Controller, um ihn zu verbinden.</p>
         </div>
       </div>
+
+      <footer class="controller-modal__footer">
+        <button class="controller-modal__close-btn" type="button" data-controller-close>
+          <span class="controller-modal__close-icon" aria-hidden="true"></span>
+          <span>schließen</span>
+        </button>
+      </footer>
     </div>
   </div>
+
 
   <!-- In-Game Pause Overlay -->
   <div id="gameOverlay" class="game-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause-Menü">
@@ -296,6 +216,7 @@
 
   <script src="node_modules/gsap/dist/gsap.min.js"></script>
   <script src="GamepadManager.js"></script>
+  <script src="FocusManager.js"></script>
   <script src="ControllerSetupUI.js"></script>
   <script src="renderer.js"></script>
 

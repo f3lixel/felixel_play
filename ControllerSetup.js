@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { resolveDeviceProfile, resolveSudachiGuid } = require('./ControllerDeviceResolver');
 
 // SDL2/SDL3 Standard-GUIDs fuer haeufige Controller. Format: 16 byte hex.
 // Quellen: SDL_gamecontrollerdb (Steam Game Controller DB).
@@ -60,20 +61,29 @@ function getProfile(controllerInfo) {
 }
 
 function getConfiguredControllers(controllerInfo) {
-  const setupControllers = controllerInfo?.setup?.controllers;
-  if (Array.isArray(setupControllers) && setupControllers.length > 0) {
-    return setupControllers
+  const connectedControllers = Array.isArray(controllerInfo?.controllers) && controllerInfo.controllers.length > 0
+    ? controllerInfo.controllers
+    : controllerInfo?.setup?.controllers;
+
+  if (Array.isArray(connectedControllers) && connectedControllers.length > 0) {
+    return connectedControllers
       .slice(0, 4)
       .sort((a, b) => Number(a.playerSlot || 1) - Number(b.playerSlot || 1))
       .map((entry, index) => ({
         entry,
         slot: Number(entry.playerSlot) || index + 1,
-        profile: CONTROLLER_PROFILES[entry.type] || CONTROLLER_PROFILES.generic,
+        profile: resolveDeviceProfile(entry, CONTROLLER_PROFILES),
       }));
   }
 
   const profile = getProfile(controllerInfo);
-  return profile ? [{ entry: controllerInfo, slot: controllerInfo.playerSlot || 1, profile }] : [];
+  return profile
+    ? [{
+      entry: controllerInfo,
+      slot: controllerInfo.playerSlot || 1,
+      profile: resolveDeviceProfile(controllerInfo, CONTROLLER_PROFILES),
+    }]
+    : [];
 }
 
 function getControllerSetting(entry, setup, key, fallback) {
@@ -84,14 +94,20 @@ function getControllerSetting(entry, setup, key, fallback) {
 // RYUJINX
 // =====================================================================
 
+function ensureRyujinxConfig(configPath) {
+  if (fs.existsSync(configPath)) return true;
+  const configDir = path.dirname(configPath);
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify({ version: 60, input_config: [] }, null, 2), 'utf-8');
+  return true;
+}
+
 function applyRyujinxController(controllerInfo) {
   const controllers = getConfiguredControllers(controllerInfo);
   if (controllers.length === 0) return { applied: false, reason: 'no-controller' };
 
   const configPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Ryujinx', 'Config.json');
-  if (!fs.existsSync(configPath)) {
-    return { applied: false, reason: 'config-missing', path: configPath };
-  }
+  ensureRyujinxConfig(configPath);
 
   let raw;
   try {
@@ -132,6 +148,8 @@ function applyRyujinxController(controllerInfo) {
 function buildRyujinxPlayer(profile, slot = 1, entry = {}, setup = {}) {
   const deadzone = Number(getControllerSetting(entry, setup, 'deadzone', 0.1));
   const vibration = Number(getControllerSetting(entry, setup, 'vibrationStrength', 1));
+  const resolvedProfile = resolveDeviceProfile(entry, CONTROLLER_PROFILES);
+  const instanceIndex = Math.max(0, slot - 1);
 
   return {
     left_joycon_stick: {
@@ -194,10 +212,11 @@ function buildRyujinxPlayer(profile, slot = 1, entry = {}, setup = {}) {
     },
     version: 1,
     backend: 'GamepadSDL3',
-    id: profile.sdl3Id,
-    name: profile.sdl3Name,
+    id: entry.sdl3Id || resolvedProfile.sdl3Id,
+    name: entry.sdl3Name || resolvedProfile.sdl3Name,
     controller_type: profile.ryujinxControllerType,
     player_index: `Player${slot}`,
+    instance_id: instanceIndex,
   };
 }
 
@@ -208,65 +227,127 @@ function buildRyujinxPlayer(profile, slot = 1, entry = {}, setup = {}) {
 // SDL Sub-Engine Mapping fuer Yuzu/Sudachi. Quad/Stick/Button strings nach
 // Yuzu-Format. guid = SDL2-GUID (32 hex chars).
 function buildSudachiButton(guid, button, port = 0) {
-  return `"engine:sdl,guid:${guid},port:${port},button:${button}"`;
+  return `"engine:sdl,port:${port},guid:${guid},button:${button}"`;
 }
 
 function buildSudachiHat(guid, direction, port = 0) {
-  return `"engine:sdl,guid:${guid},port:${port},hat:0,direction:${direction}"`;
+  return `"engine:sdl,port:${port},guid:${guid},hat:0,direction:${direction}"`;
 }
 
 function buildSudachiAxis(guid, axis, port = 0, threshold = 0.5, direction = '+') {
-  return `"engine:sdl,guid:${guid},port:${port},axis:${axis},threshold:${threshold},invert:${direction}"`;
+  return `"engine:sdl,port:${port},guid:${guid},axis:${axis},threshold:${threshold},invert:${direction}"`;
 }
 
 function buildSudachiStick(guid, stick, port = 0) {
   const axes = stick === 'left' ? { x: 0, y: 1 } : { x: 2, y: 3 };
-  return `"engine:sdl,guid:${guid},port:${port},axis_x:${axes.x},axis_y:${axes.y},offset_x:-0.000000,offset_y:-0.000000,invert_x:+,invert_y:+,deadzone:0.100000,range:1.000000"`;
+  return `"engine:sdl,port:${port},guid:${guid},axis_x:${axes.x},axis_y:${axes.y},offset_x:-0.000000,offset_y:-0.000000,invert_x:+,invert_y:+,deadzone:0.100000,range:1.000000"`;
 }
 
 function buildSudachiMotion(guid, motion, port = 0) {
-  return `"engine:sdl,guid:${guid},port:${port},motion:${motion}"`;
+  return `"engine:sdl,port:${port},guid:${guid},motion:${motion}"`;
+}
+
+function getSudachiFaceButtons(entry = {}) {
+  if (entry.type === 'dualshock4' || entry.type === 'dualsense') {
+    return { a: 1, b: 0, x: 3, y: 2 };
+  }
+  return { a: 0, b: 1, x: 2, y: 3 };
+}
+
+function getSudachiDpadBindings(guid, sdlPort, entry = {}) {
+  if (entry.type === 'dualshock4' || entry.type === 'dualsense') {
+    return {
+      button_dleft: buildSudachiHat(guid, 'left', sdlPort),
+      button_dup: buildSudachiHat(guid, 'up', sdlPort),
+      button_dright: buildSudachiHat(guid, 'right', sdlPort),
+      button_ddown: buildSudachiHat(guid, 'down', sdlPort),
+    };
+  }
+
+  return {
+    button_dleft: buildSudachiButton(guid, 13, sdlPort),
+    button_dup: buildSudachiButton(guid, 11, sdlPort),
+    button_dright: buildSudachiButton(guid, 14, sdlPort),
+    button_ddown: buildSudachiButton(guid, 12, sdlPort),
+  };
+}
+
+function getSudachiBindingSettings(guid, sdlPort, entry = {}, setup = {}, keyPrefix = '') {
+  const prefix = keyPrefix ? `${keyPrefix}_` : '';
+  const deadzone = Number(getControllerSetting(entry, setup, 'deadzone', 0.1)).toFixed(6);
+  const dpad = getSudachiDpadBindings(guid, sdlPort, entry);
+  const face = getSudachiFaceButtons(entry);
+
+  return {
+    [`${prefix}type`]: '0',
+    [`${prefix}button_a`]: buildSudachiButton(guid, face.a, sdlPort),
+    [`${prefix}button_b`]: buildSudachiButton(guid, face.b, sdlPort),
+    [`${prefix}button_x`]: buildSudachiButton(guid, face.x, sdlPort),
+    [`${prefix}button_y`]: buildSudachiButton(guid, face.y, sdlPort),
+    [`${prefix}button_lstick`]: buildSudachiButton(guid, 7, sdlPort),
+    [`${prefix}button_rstick`]: buildSudachiButton(guid, 8, sdlPort),
+    [`${prefix}button_l`]: buildSudachiButton(guid, 9, sdlPort),
+    [`${prefix}button_r`]: buildSudachiButton(guid, 10, sdlPort),
+    [`${prefix}button_zl`]: buildSudachiAxis(guid, 4, sdlPort, 0.5, '+'),
+    [`${prefix}button_zr`]: buildSudachiAxis(guid, 5, sdlPort, 0.5, '+'),
+    [`${prefix}button_plus`]: buildSudachiButton(guid, 6, sdlPort),
+    [`${prefix}button_minus`]: buildSudachiButton(guid, 4, sdlPort),
+    [`${prefix}button_dleft`]: dpad.button_dleft,
+    [`${prefix}button_dup`]: dpad.button_dup,
+    [`${prefix}button_dright`]: dpad.button_dright,
+    [`${prefix}button_ddown`]: dpad.button_ddown,
+    [`${prefix}button_sl`]: '""',
+    [`${prefix}button_sr`]: '""',
+    [`${prefix}button_home`]: buildSudachiButton(guid, 5, sdlPort),
+    [`${prefix}button_screenshot`]: '""',
+    [`${prefix}button_slleft`]: buildSudachiButton(guid, 9, sdlPort),
+    [`${prefix}button_srleft`]: buildSudachiButton(guid, 10, sdlPort),
+    [`${prefix}button_slright`]: buildSudachiButton(guid, 9, sdlPort),
+    [`${prefix}button_srright`]: buildSudachiButton(guid, 10, sdlPort),
+    [`${prefix}lstick`]: buildSudachiStickWithDeadzone(guid, 'left', sdlPort, deadzone),
+    [`${prefix}rstick`]: buildSudachiStickWithDeadzone(guid, 'right', sdlPort, deadzone),
+    [`${prefix}motionleft`]: buildSudachiMotion(guid, 0, sdlPort),
+    [`${prefix}motionright`]: buildSudachiMotion(guid, 1, sdlPort),
+  };
 }
 
 function getSudachiPlayerSettings(guid, playerIndex, entry = {}, setup = {}) {
-  const prefix = `player_${playerIndex}`;
-  const deadzone = Number(getControllerSetting(entry, setup, 'deadzone', 0.1)).toFixed(6);
-  // Standard SDL Game Controller Mapping (entspricht "South=0, East=1, West=2, North=3, ...")
-  return {
-    [`${prefix}_button_a`]: buildSudachiButton(guid, 0, playerIndex),
-    [`${prefix}_button_b`]: buildSudachiButton(guid, 1, playerIndex),
-    [`${prefix}_button_x`]: buildSudachiButton(guid, 2, playerIndex),
-    [`${prefix}_button_y`]: buildSudachiButton(guid, 3, playerIndex),
-    [`${prefix}_button_lstick`]: buildSudachiButton(guid, 7, playerIndex),
-    [`${prefix}_button_rstick`]: buildSudachiButton(guid, 8, playerIndex),
-    [`${prefix}_button_l`]: buildSudachiButton(guid, 9, playerIndex),
-    [`${prefix}_button_r`]: buildSudachiButton(guid, 10, playerIndex),
-    [`${prefix}_button_zl`]: buildSudachiAxis(guid, 4, playerIndex, 0.5, '+'),
-    [`${prefix}_button_zr`]: buildSudachiAxis(guid, 5, playerIndex, 0.5, '+'),
-    [`${prefix}_button_plus`]: buildSudachiButton(guid, 6, playerIndex),
-    [`${prefix}_button_minus`]: buildSudachiButton(guid, 4, playerIndex),
-    [`${prefix}_button_dleft`]: buildSudachiButton(guid, 13, playerIndex),
-    [`${prefix}_button_dup`]: buildSudachiButton(guid, 11, playerIndex),
-    [`${prefix}_button_dright`]: buildSudachiButton(guid, 14, playerIndex),
-    [`${prefix}_button_ddown`]: buildSudachiButton(guid, 12, playerIndex),
-    [`${prefix}_button_sl`]: '""',
-    [`${prefix}_button_sr`]: '""',
-    [`${prefix}_button_home`]: buildSudachiButton(guid, 5, playerIndex),
-    [`${prefix}_button_screenshot`]: '""',
-    [`${prefix}_button_slleft`]: '""',
-    [`${prefix}_button_srleft`]: '""',
-    [`${prefix}_button_slright`]: '""',
-    [`${prefix}_button_srright`]: '""',
-    [`${prefix}_lstick`]: buildSudachiStickWithDeadzone(guid, 'left', playerIndex, deadzone),
-    [`${prefix}_rstick`]: buildSudachiStickWithDeadzone(guid, 'right', playerIndex, deadzone),
-    [`${prefix}_motionleft`]: buildSudachiMotion(guid, 0, playerIndex),
-    [`${prefix}_motionright`]: buildSudachiMotion(guid, 1, playerIndex),
-  };
+  const sdlPort = typeof entry.sdlPort === 'number' ? entry.sdlPort : playerIndex;
+  return getSudachiBindingSettings(guid, sdlPort, entry, setup, `player_${playerIndex}`);
+}
+
+function getSudachiProfileName(slot) {
+  return slot === 1 ? 'FelixelPlay' : `FelixelP${slot}`;
+}
+
+function writeSudachiProfileFile(profileName, guid, sdlPort, entry = {}, setup = {}) {
+  const profileDir = path.join(os.homedir(), 'AppData', 'Roaming', 'sudachi', 'config', 'input');
+  fs.mkdirSync(profileDir, { recursive: true });
+
+  const settings = getSudachiBindingSettings(guid, sdlPort, entry, setup);
+  const lines = ['[Controls]'];
+
+  for (const [key, value] of Object.entries(settings)) {
+    lines.push(`${key}\\default=false`);
+    lines.push(`${key}=${value}`);
+  }
+
+  const profilePath = path.join(profileDir, `${profileName}.ini`);
+  fs.writeFileSync(profilePath, `${lines.join('\n')}\n`, 'utf-8');
+  return profilePath;
 }
 
 function buildSudachiStickWithDeadzone(guid, stick, port, deadzone) {
   const axes = stick === 'left' ? { x: 0, y: 1 } : { x: 2, y: 3 };
-  return `"engine:sdl,guid:${guid},port:${port},axis_x:${axes.x},axis_y:${axes.y},offset_x:-0.000000,offset_y:-0.000000,invert_x:+,invert_y:+,deadzone:${deadzone},range:1.000000"`;
+  return `"engine:sdl,port:${port},guid:${guid},axis_x:${axes.x},axis_y:${axes.y},offset_x:-0.000000,offset_y:-0.000000,invert_x:+,invert_y:+,deadzone:${deadzone},range:1.000000"`;
+}
+
+function ensureSudachiConfig(configPath) {
+  if (fs.existsSync(configPath)) return true;
+  const configDir = path.dirname(configPath);
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(configPath, '[Controls]\n', 'utf-8');
+  return true;
 }
 
 function applySudachiController(controllerInfo) {
@@ -274,9 +355,7 @@ function applySudachiController(controllerInfo) {
   if (controllers.length === 0) return { applied: false, reason: 'no-controller' };
 
   const configPath = path.join(os.homedir(), 'AppData', 'Roaming', 'sudachi', 'config', 'qt-config.ini');
-  if (!fs.existsSync(configPath)) {
-    return { applied: false, reason: 'config-missing', path: configPath };
-  }
+  ensureSudachiConfig(configPath);
 
   let raw;
   try {
@@ -288,17 +367,32 @@ function applySudachiController(controllerInfo) {
   let settings = {};
   let baseOverrides = {};
 
+  const profilePaths = [];
+
   for (const { profile, slot, entry } of controllers) {
     const playerIndex = Math.max(0, Math.min(3, slot - 1));
+    const guid = resolveSudachiGuid(entry) || profile.sdl2Guid;
+    const sdlPort = typeof entry.sdlPort === 'number' ? entry.sdlPort : playerIndex;
+    const profileName = getSudachiProfileName(slot);
+
+    const profilePath = writeSudachiProfileFile(
+      profileName,
+      guid,
+      sdlPort,
+      entry,
+      controllerInfo?.setup,
+    );
+    profilePaths.push(profilePath);
+
     settings = {
       ...settings,
-      ...getSudachiPlayerSettings(profile.sdl2Guid, playerIndex, entry, controllerInfo?.setup),
+      ...getSudachiPlayerSettings(guid, playerIndex, { ...entry, sdlPort }, controllerInfo?.setup),
     };
     baseOverrides = {
       ...baseOverrides,
-      [`player_${playerIndex}_type`]: '0', // 0 = Pro Controller
+      [`player_${playerIndex}_type`]: '0',
       [`player_${playerIndex}_connected`]: 'true',
-      [`player_${playerIndex}_profile_name`]: '"FelixelPlay"',
+      [`player_${playerIndex}_profile_name`]: profileName,
     };
   }
 
@@ -313,7 +407,12 @@ function applySudachiController(controllerInfo) {
     return { applied: false, reason: `write-failed: ${err.message}` };
   }
 
-  return { applied: true, profile: `${controllers.length} Controller`, path: configPath };
+  return {
+    applied: true,
+    profile: `${controllers.length} Controller`,
+    path: configPath,
+    profiles: profilePaths,
+  };
 }
 
 // Setzt key=value und key\default=false innerhalb der angegebenen Section.
@@ -395,8 +494,11 @@ function ensureDolphinPortable(dolphinExePath) {
   return { userDir, configDir };
 }
 
-function buildDolphinSdlController(profile, padNumber) {
-  const deviceLine = `Device = SDL/0/${profile.sdl3Name.replace(/\s*\(\d+\)$/, '')}`;
+function buildDolphinSdlController(profile, padNumber, entry = {}) {
+  const deviceName = entry.sdlDeviceName
+    || entry.name
+    || profile.sdl3Name.replace(/\s*\(\d+\)$/, '');
+  const deviceLine = `Device = SDL/0/${deviceName}`;
   return [
     `[GCPad${padNumber}]`,
     deviceLine,
@@ -428,8 +530,11 @@ function buildDolphinSdlController(profile, padNumber) {
   ].join('\n');
 }
 
-function buildDolphinWiimote(profile, padNumber) {
-  const deviceLine = `Device = SDL/0/${profile.sdl3Name.replace(/\s*\(\d+\)$/, '')}`;
+function buildDolphinWiimote(profile, padNumber, entry = {}) {
+  const deviceName = entry.sdlDeviceName
+    || entry.name
+    || profile.sdl3Name.replace(/\s*\(\d+\)$/, '');
+  const deviceLine = `Device = SDL/0/${deviceName}`;
   return [
     `[Wiimote${padNumber}]`,
     'Source = 1',
@@ -483,10 +588,10 @@ function applyDolphinController(controllerInfo, dolphinExePath) {
   const { configDir } = ensureDolphinPortable(dolphinExePath);
 
   const gcPadIni = ['# Generated by felixel play launcher', '']
-    .concat(controllers.map(({ profile, slot }) => buildDolphinSdlController(profile, slot)))
+    .concat(controllers.map(({ profile, slot, entry }) => buildDolphinSdlController(profile, slot, entry)))
     .join('\n');
   const wiimoteIni = ['# Generated by felixel play launcher', '']
-    .concat(controllers.map(({ profile, slot }) => buildDolphinWiimote(profile, slot)))
+    .concat(controllers.map(({ profile, slot, entry }) => buildDolphinWiimote(profile, slot, entry)))
     .join('\n');
 
   try {
@@ -508,8 +613,9 @@ function applyControllerForPlatform({ platform, emulator, controllerInfo, dolphi
     return { applied: false, reason: 'no-controller' };
   }
 
+  const controllerCount = getConfiguredControllers(controllerInfo).length;
   const profile = getProfile(controllerInfo);
-  console.log(`[ControllerSetup] Aktiver Controller: ${profile?.label || 'unbekannt'} (${controllerInfo.type})`);
+  console.log(`[ControllerSetup] ${controllerCount} Controller fuer Emulator vorbereitet (${profile?.label || controllerInfo.type || 'unbekannt'})`);
 
   if (platform === 'Wii' || platform === 'WiiU') {
     return applyDolphinController(controllerInfo, dolphinExePath);

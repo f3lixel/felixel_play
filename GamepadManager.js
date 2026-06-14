@@ -190,6 +190,32 @@ function saveControllerSetupConfig(config) {
   localStorage.setItem(CONTROLLER_SETUP_STORAGE_KEY, JSON.stringify(config));
 }
 
+function playConnectVibration(gamepad, strength = 1) {
+  if (!gamepad) return;
+
+  const scale = Math.max(0, Math.min(1, Number(strength) || 1));
+  const actuator = gamepad.vibrationActuator;
+  if (!actuator) return;
+
+  const duration = 360;
+  const weakMagnitude = 0.55 * scale;
+  const strongMagnitude = 0.8 * scale;
+
+  if (typeof actuator.playEffect === 'function') {
+    actuator.playEffect('dual-rumble', {
+      startDelay: 0,
+      duration,
+      weakMagnitude,
+      strongMagnitude,
+    }).catch(() => {});
+    return;
+  }
+
+  if (typeof actuator.pulse === 'function') {
+    actuator.pulse(strongMagnitude, duration).catch(() => {});
+  }
+}
+
 function resolvePlayerOneGamepad(config = loadControllerSetupConfig(), gamepads = getAllRealGamepads()) {
   if (gamepads.length === 0) return null;
 
@@ -324,6 +350,7 @@ class GamepadManager {
     }
 
     this.selectBestGamepad();
+    playConnectVibration(gamepad, this.setupConfig?.global?.vibrationStrength ?? 1);
     this.callbacks.onConnect(gamepad);
   }
 
@@ -384,6 +411,7 @@ class GamepadManager {
       }
 
       this.selectBestGamepad();
+      playConnectVibration(gamepad, this.setupConfig?.global?.vibrationStrength ?? 1);
       this.callbacks.onConnect(gamepad);
     }
   }
@@ -559,4 +587,5 @@ window.GamepadUtils = {
   loadControllerSetupConfig,
   saveControllerSetupConfig,
   resolvePlayerOneGamepad,
+  playConnectVibration,
 };

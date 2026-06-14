@@ -2,7 +2,8 @@ const { app, BrowserWindow, ipcMain, globalShortcut, screen } = require('electro
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { applyControllerForPlatform } = require('./ControllerSetup');
+const { applyControllerForPlatform, CONTROLLER_PROFILES } = require('./ControllerSetup');
+const { buildLaunchControllerInfo } = require('./ControllerDeviceResolver');
 const { NativeControllerManager } = require('./NativeControllerManager');
 const { JoyCon2BridgeManager } = require('./JoyCon2BridgeManager');
 
@@ -381,27 +382,28 @@ function saveControllerSetupToDisk(config) {
   controllerSetupConfig = config;
 }
 
-function resolveControllerInfoFromSetup(fallbackControllerInfo) {
-  if (!controllerSetupConfig?.controllers?.length) {
-    return fallbackControllerInfo;
+function resolveLaunchControllerInfo(rendererFallback) {
+  const sdlControllers = nativeControllerManager?.getConnectedControllers() || [];
+  const joyconControllers = joyCon2BridgeManager?.getConnectedControllers() || [];
+  const savedSetup = controllerSetupConfig || loadControllerSetupFromDisk();
+
+  const resolved = buildLaunchControllerInfo({
+    sdlControllers,
+    joyconControllers,
+    rendererFallback,
+    savedSetup,
+    profiles: CONTROLLER_PROFILES,
+  });
+
+  if (resolved?.controllers?.length) {
+    console.log('[ControllerSetup] Verbundene Controller beim Launch:', resolved.controllers.map((controller) => (
+      `P${controller.playerSlot}: ${controller.label} (${controller.guid || 'kein-guid'})`
+    )).join(', '));
+  } else {
+    console.warn('[ControllerSetup] Kein verbundener Controller beim Launch erkannt.');
   }
 
-  const prioritized = controllerSetupConfig.controllers.find((entry) => entry.prioritizePlayer1);
-  const playerOne = prioritized || controllerSetupConfig.controllers[0];
-  if (!playerOne) return fallbackControllerInfo;
-
-  return {
-    id: playerOne.label || fallbackControllerInfo?.id || '',
-    mapping: playerOne.mappingProfile || controllerSetupConfig.global?.mappingProfile || fallbackControllerInfo?.mapping || '',
-    vendorId: playerOne.vendorId || fallbackControllerInfo?.vendorId || '',
-    productId: playerOne.productId || fallbackControllerInfo?.productId || '',
-    type: playerOne.type || fallbackControllerInfo?.type || 'generic',
-    playerSlot: playerOne.playerSlot || 1,
-    mappingProfile: playerOne.mappingProfile || controllerSetupConfig.global?.mappingProfile || fallbackControllerInfo?.mappingProfile || 'standard',
-    deadzone: playerOne.deadzone ?? controllerSetupConfig.global?.deadzone ?? fallbackControllerInfo?.deadzone ?? 0.35,
-    vibrationStrength: playerOne.vibrationStrength ?? controllerSetupConfig.global?.vibrationStrength ?? fallbackControllerInfo?.vibrationStrength ?? 1,
-    setup: controllerSetupConfig,
-  };
+  return resolved;
 }
 
 // --- IPC Handlers ---
@@ -507,7 +509,7 @@ ipcMain.handle('launch-game', async (_event, { platform, romPath, emulator, laun
   let lastError = null;
 
   for (const entry of availableEntries) {
-    const resolvedControllerInfo = resolveControllerInfoFromSetup(controllerInfo);
+    const resolvedControllerInfo = resolveLaunchControllerInfo(controllerInfo);
     const result = await launchEmulatorEntry(entry, { platform, controllerInfo: resolvedControllerInfo });
     if (result.success) {
       return result;
@@ -634,7 +636,7 @@ ipcMain.handle('overlay-open-settings', () => {
 
 function applyControllerForEntry(entry, platform, controllerInfo) {
   if (!controllerInfo) {
-    return;
+    return { applied: false, reason: 'no-controller' };
   }
 
   try {
@@ -645,17 +647,22 @@ function applyControllerForEntry(entry, platform, controllerInfo) {
       dolphinExePath: EMULATORS.dolphin,
     });
     if (result.applied) {
-      console.log(`[ControllerSetup] ${entry.label}: ${result.profile} konfiguriert: ${result.path}`);
+      const profileInfo = Array.isArray(result.profiles) && result.profiles.length > 0
+        ? ` | Profile: ${result.profiles.join(', ')}`
+        : '';
+      console.log(`[ControllerSetup] ${entry.label}: ${result.profile} konfiguriert: ${result.path}${profileInfo}`);
     } else {
       console.warn(`[ControllerSetup] ${entry.label}: Nicht angewendet: ${result.reason}`);
     }
+    return result;
   } catch (err) {
     console.warn(`[ControllerSetup] ${entry.label}: Fehler: ${err.message}`);
+    return { applied: false, reason: err.message };
   }
 }
 
 function launchEmulatorEntry(entry, { platform, controllerInfo }) {
-  applyControllerForEntry(entry, platform, controllerInfo);
+  const controllerSetupResult = applyControllerForEntry(entry, platform, controllerInfo);
 
   return new Promise((resolve) => {
     const workingDirectory = path.dirname(entry.cmd);
@@ -683,7 +690,10 @@ function launchEmulatorEntry(entry, { platform, controllerInfo }) {
       child.unref();
       activeEmulatorPid = child.pid;
       console.log(`[Overlay] Emulator laeuft – PID ${child.pid}, Guide/Home-Taste aktiv`);
-      resolve({ success: true });
+      resolve({
+        success: true,
+        controllerSetup: controllerSetupResult,
+      });
     }
 
     child.once('error', (err) => {

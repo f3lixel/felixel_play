@@ -9,6 +9,9 @@ const DUALSENSE_PRODUCT_IDS = new Set([0x0ce6, 0x0df2]);
 const NINTENDO_TYPE_PREFIX = 'nintendoSwitch';
 const KEEPALIVE_INTERVAL_MS = 12000;
 const RESCAN_DELAY_MS = 900;
+const CONNECT_RUMBLE_LOW = 0.55;
+const CONNECT_RUMBLE_HIGH = 0.75;
+const CONNECT_RUMBLE_MS = 420;
 
 const DEFAULT_BUTTON_LABELS = {
   a: 'A',
@@ -292,9 +295,29 @@ class NativeControllerManager extends EventEmitter {
     this.controllers.set(key, entry);
     this.attachInstanceEvents(entry);
     this.startKeepAlive(entry);
+    this.pulseConnectRumble(entry);
     this.emitInput(this.buildBaseEvent(entry, 'connect'));
     console.log(`[Controller] Verbunden: ${info.controllerType} - ${info.name}`);
     return instance;
+  }
+
+  pulseConnectRumble(entry) {
+    const { instance } = entry;
+    if (!instance?.hasRumble || typeof instance.rumble !== 'function') return;
+
+    try {
+      instance.rumble(CONNECT_RUMBLE_LOW, CONNECT_RUMBLE_HIGH, CONNECT_RUMBLE_MS);
+      setTimeout(() => {
+        if (instance.closed) return;
+        try {
+          instance.rumble(0, 0, 0);
+        } catch {
+          // Motor-Stopp ist optional; Verbindungs-Feedback war bereits aktiv.
+        }
+      }, CONNECT_RUMBLE_MS + 40);
+    } catch (err) {
+      console.warn(`[Controller] Verbindungs-Vibration fehlgeschlagen (${entry.info.name}): ${err.message}`);
+    }
   }
 
   attachInstanceEvents(entry) {

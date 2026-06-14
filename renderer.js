@@ -31,12 +31,21 @@ let focusedGames = [];
 let currentIndex = -1;
 let gamepadManager = null;
 let gamepadHintTimer = null;
-let controllerSetupUI = null;
 let focusSelectionTimer = null;
 let nativeControllerUnsubscribe = null;
 let nativeControllerAvailable = false;
 const nativeControllers = new Map();
 const nativeAxisDirections = new Map();
+
+// Zeitpunkt der letzten Controller-Verbindung. Verhindert, dass der Tastendruck,
+// der einen Controller im offenen Setup-Popup verbindet, das Popup sofort wieder
+// schließt.
+let lastControllerConnectAt = 0;
+const CONTROLLER_SETUP_CLOSE_GRACE_MS = 1200;
+
+function controllerSetupActive() {
+  return typeof window.isControllerSetupOpen === 'function' && window.isControllerSetupOpen();
+}
 
 const FOCUS_SELECTION_DELAY_MS = 120;
 const RECENT_GAMES_KEY = 'felixel:recent-games';
@@ -47,8 +56,8 @@ let currentCategory = 'recent';
 
 document.addEventListener('DOMContentLoaded', async () => {
   setupLauncherEvents();
+  setupFocusManager();
   setupKeyboardNavigation();
-  setupControllerOverlay();
   setupGamepadInput();
   setupInGameOverlay();
   setupTopBarControls();
@@ -246,6 +255,7 @@ function renderShelf(animate = false) {
 
     currentIndex = currentIndex < 0 ? 0 : Math.min(currentIndex, sorted.length - 1);
     setFocusedGameByIndex(currentIndex, { scroll: true, playSound: false, immediateHero: true });
+    window.FelixelFocusManager?.refresh();
 
     if (animate && window.gsap) {
       const cards = Array.from(shelf.querySelectorAll('.shelf-card'));
@@ -418,14 +428,10 @@ function setFocusedGameByIndex(index, options = {}) {
 
 function setupKeyboardNavigation() {
   document.addEventListener('keydown', (e) => {
-    if (controllerSetupUI?.isOpen) {
-      const modalKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape'];
-      if (modalKeys.includes(e.key)) return;
-    }
-
     const target = e.target;
     const isTyping = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target?.isContentEditable;
     if (isTyping) return;
+    if (controllerSetupActive()) return;
 
     switch (e.key) {
       case 'ArrowLeft':
@@ -436,15 +442,94 @@ function setupKeyboardNavigation() {
         e.preventDefault();
         moveFocus('right');
         break;
-      case 'Enter':
-        if (document.activeElement?.classList?.contains('game-card')) return;
+      case 'ArrowUp':
         e.preventDefault();
-        launchFocusedGame();
+        moveFocus('up');
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        moveFocus('down');
+        break;
+      case 'Enter':
+        e.preventDefault();
+        window.FelixelFocusManager?.confirm();
+        break;
+      case 'Escape':
+        e.preventDefault();
+        handleBackAction();
         break;
       default:
         break;
     }
   });
+}
+
+// ===== FOCUS MANAGER =====
+
+function setupFocusManager() {
+  if (!window.FelixelFocusManager) return;
+
+  window.FelixelFocusManager.init({
+    isModalOpen: controllerSetupActive,
+    getCategoryIndex: () => NAVIGABLE_TABS.indexOf(currentCategory),
+    getShelfCount: () => focusedGames.length,
+    hasShelfFocus: () => currentIndex >= 0,
+    onShelfMove: handleShelfMove,
+    onShelfConfirm: launchFocusedGame,
+    onCategorySelect: (category) => {
+      document.querySelector(`.ps5-category[data-category="${category}"]`)?.click();
+    },
+    onTopBarAction: handleTopBarAction,
+    onPlayHoverSound: playHoverSound,
+    onHintChange: updateGamepadHint,
+  });
+}
+
+function handleShelfMove(direction) {
+  if (direction === 'restore') {
+    if (focusedGames.length > 0 && currentIndex < 0) {
+      setFocusedGameByIndex(0, { scroll: true, playSound: false });
+    }
+    document.querySelector('.shelf-card.is-focused')?.focus({ preventScroll: true });
+    return;
+  }
+
+  if (focusedGames.length === 0) return;
+
+  const delta = direction === 'left' ? -1 : 1;
+  const nextIndex = Math.max(0, Math.min(focusedGames.length - 1, currentIndex + delta));
+  if (nextIndex !== currentIndex) {
+    setFocusedGameByIndex(nextIndex);
+    document.querySelector('.shelf-card.is-focused')?.focus({ preventScroll: true });
+  }
+}
+
+function handleTopBarAction(buttonId) {
+  switch (buttonId) {
+    case 'btnControllerSetup':
+      window.openControllerSetup?.();
+      break;
+    case 'btnPower':
+      openSettings();
+      break;
+    case 'btnActivities':
+      showToast('Aktivitäten folgen bald.');
+      break;
+    default:
+      break;
+  }
+}
+
+function updateGamepadHint(text) {
+  const prompt = document.getElementById('startPrompt');
+  if (!prompt) return;
+
+  if (!document.body.classList.contains('is-gamepad-mode')) {
+    prompt.innerHTML = 'Press <span class="x-btn-circle">&#x2715;</span> to start';
+    return;
+  }
+
+  prompt.textContent = text || 'Press ✕ to start';
 }
 
 // ===== TOP BAR CONTROLS =====
@@ -482,52 +567,11 @@ function setupCategoryTabs() {
 
       currentIndex = -1;
       renderShelf(true);
+      window.FelixelFocusManager?.refresh();
     });
   });
 }
 
-// ===== CONTROLLER OVERLAY =====
-
-function setupControllerOverlay() {
-  const btnOpen = document.getElementById('btnController');
-  const overlay = document.getElementById('controllerOverlay');
-  const btnClose = document.getElementById('btnControllerClose');
-
-  if (!window.ControllerSetupUI) {
-    console.warn('[ControllerSetup] ControllerSetupUI ist nicht verfügbar.');
-    btnOpen?.addEventListener('click', () => overlay?.classList.remove('hidden'));
-    btnClose?.addEventListener('click', () => overlay?.classList.add('hidden'));
-    return;
-  }
-
-  controllerSetupUI = new window.ControllerSetupUI({
-    gamepadManager: null,
-  });
-  controllerSetupUI.init();
-
-  window.api?.getControllerSetup?.().then((remoteConfig) => {
-    if (!remoteConfig || !controllerSetupUI) return;
-    controllerSetupUI.config = {
-      ...controllerSetupUI.config,
-      ...remoteConfig,
-      global: {
-        ...controllerSetupUI.config.global,
-        ...(remoteConfig.global || {}),
-      },
-      controllers: Array.isArray(remoteConfig.controllers) ? remoteConfig.controllers : controllerSetupUI.config.controllers,
-    };
-    controllerSetupUI.renderGlobalSettings();
-    controllerSetupUI.syncConnectedControllers({ silent: true });
-    window.felixelGamepadManager?.applySetupConfig(controllerSetupUI.getConfig(), { silent: true });
-  }).catch(() => {});
-
-  window.felixelControllerSetupUI = controllerSetupUI;
-
-  btnOpen?.addEventListener('click', () => {
-    if (controllerSetupUI?.isOpen) return;
-    controllerSetupUI?.handleOpen?.();
-  });
-}
 
 // ===== CLOCK, DATE & WIFI =====
 
@@ -581,7 +625,7 @@ async function launchGame(game) {
   showLaunchOverlay(game);
 
   try {
-    const controllerInfo = getActiveControllerInfo();
+    const controllerInfo = getConnectedControllersForLaunch();
     const result = await window.api.launchGame(
       game.platform,
       game.romPath,
@@ -593,7 +637,13 @@ async function launchGame(game) {
       muteLauncherAudio();
       hideLaunchOverlay();
       rememberPlayedGame(game);
-      showToast(`${game.title} wird gestartet...`);
+      if (result.controllerSetup?.applied === false) {
+        showToast('Spiel startet – Controller konnte im Emulator nicht automatisch registriert werden.', true);
+      } else if (result.controllerSetup?.applied && result.controllerSetup?.profile) {
+        showToast(`${game.title} wird gestartet (${result.controllerSetup.profile})`);
+      } else {
+        showToast(`${game.title} wird gestartet...`);
+      }
     } else {
       unmuteLauncherAudio();
       hideLaunchOverlay();
@@ -608,42 +658,78 @@ async function launchGame(game) {
   }
 }
 
-function getActiveControllerInfo() {
-  const nativeController = getActiveNativeController();
-  if (nativeController) {
-    const config = controllerSetupUI?.getConfig?.() || window.GamepadUtils?.loadControllerSetupConfig?.() || null;
-    return {
-      id: nativeController.name || nativeController.id,
-      mapping: 'sdl',
-      vendorId: nativeController.vendorId || '',
-      productId: nativeController.productId || '',
-      type: toSetupControllerType(nativeController),
-      playerSlot: nativeController.player || 1,
-      mappingProfile: config?.global?.mappingProfile || 'standard',
-      deadzone: config?.global?.deadzone ?? 0.35,
-      vibrationStrength: config?.global?.vibrationStrength ?? 1,
-    };
+function buildControllerInfoEntry(controller, slot, config = null) {
+  return {
+    id: controller.name || controller.id,
+    label: controller.name || controller.model || controller.controllerModel || controller.id,
+    name: controller.name || controller.model || controller.controllerModel || controller.id,
+    mapping: controller.mapping || 'sdl',
+    vendorId: controller.vendorId || '',
+    productId: controller.productId || '',
+    type: toSetupControllerType(controller),
+    playerSlot: slot,
+    guid: controller.guid || '',
+    source: controller.source || 'sdl',
+    mappingProfile: config?.global?.mappingProfile || 'standard',
+    deadzone: config?.global?.deadzone ?? 0.35,
+    vibrationStrength: config?.global?.vibrationStrength ?? 1,
+  };
+}
+
+function getConnectedControllersForLaunch() {
+  const config = window.GamepadUtils?.loadControllerSetupConfig?.() || null;
+  const controllers = [];
+
+  if (nativeControllerAvailable && nativeControllers.size > 0) {
+    const sorted = Array.from(nativeControllers.values())
+      .sort((a, b) => (a.player ?? 99) - (b.player ?? 99));
+    sorted.forEach((controller, index) => {
+      controllers.push(buildControllerInfoEntry(controller, controller.player || index + 1, config));
+    });
+  } else {
+    const { getAllRealGamepads, parseControllerInfo, getGamepadKey } = window.GamepadUtils || {};
+    const gamepads = getAllRealGamepads?.() || [];
+    gamepads.forEach((gamepad, index) => {
+      const info = parseControllerInfo?.(gamepad) || {};
+      const entry = config?.controllers?.find((item) => item.key === getGamepadKey?.(gamepad));
+      controllers.push({
+        ...info,
+        id: gamepad.id,
+        label: info.id || gamepad.id,
+        name: info.id || gamepad.id,
+        guid: '',
+        playerSlot: entry?.playerSlot || index + 1,
+        mappingProfile: entry?.mappingProfile || config?.global?.mappingProfile || 'standard',
+        deadzone: entry?.deadzone ?? config?.global?.deadzone ?? 0.35,
+        vibrationStrength: entry?.vibrationStrength ?? config?.global?.vibrationStrength ?? 1,
+        source: 'web-gamepad',
+      });
+    });
   }
 
-  const { getAllRealGamepads, parseControllerInfo, resolvePlayerOneGamepad, loadControllerSetupConfig, getGamepadKey } = window.GamepadUtils || {};
-  if (!getAllRealGamepads || !parseControllerInfo) return null;
-
-  const gamepads = getAllRealGamepads();
-  if (gamepads.length === 0) return null;
-
-  const config = controllerSetupUI?.getConfig?.() || loadControllerSetupConfig?.() || null;
-  const pick = resolvePlayerOneGamepad?.(config, gamepads) || gamepads[0];
-  if (!pick) return null;
-
-  const info = parseControllerInfo(pick);
-  const entry = config?.controllers?.find((controller) => controller.key === getGamepadKey?.(pick));
+  if (controllers.length === 0) return null;
 
   return {
-    ...info,
-    playerSlot: entry?.playerSlot || 1,
-    mappingProfile: entry?.mappingProfile || config?.global?.mappingProfile || 'standard',
-    deadzone: entry?.deadzone ?? config?.global?.deadzone ?? 0.35,
-    vibrationStrength: entry?.vibrationStrength ?? config?.global?.vibrationStrength ?? 1,
+    ...controllers[0],
+    controllers,
+    setup: {
+      ...(config || {}),
+      controllers,
+      global: config?.global || {
+        deadzone: 0.35,
+        vibrationStrength: 1,
+        mappingProfile: 'standard',
+      },
+    },
+  };
+}
+
+function getActiveControllerInfo() {
+  const payload = getConnectedControllersForLaunch();
+  if (!payload) return null;
+  return {
+    ...payload,
+    playerSlot: payload.playerSlot || 1,
   };
 }
 
@@ -803,6 +889,7 @@ function setupNativeControllerInput() {
       if (controllers.length > 0) {
         hideGamepadHint();
         document.body.classList.add('is-gamepad-mode');
+        window.FelixelFocusManager?.ensureShelfFocus();
       }
     })
     .catch((err) => {
@@ -829,24 +916,19 @@ function setupBrowserGamepadInput() {
   gamepadManager = new window.GamepadManager({
     deadzone: window.GamepadUtils?.loadControllerSetupConfig?.().global?.deadzone ?? 0.35,
     onConnect: (gamepad) => {
+      lastControllerConnectAt = performance.now();
       const friendlyName = describeGamepad(gamepad);
       console.info(`[Gamepad] Verbunden: ${gamepad.id} (mapping=${gamepad.mapping || 'n/a'})`);
       showToast(`Controller verbunden: ${friendlyName}`);
       hideGamepadHint();
-      controllerSetupUI?.syncConnectedControllers?.();
-      if (controllerSetupUI?.isOpen) controllerSetupUI.render();
+      window.FelixelFocusManager?.ensureShelfFocus();
     },
     onDisconnect: (gamepad) => {
       console.info(`[Gamepad] Getrennt: ${gamepad.id}`);
       showToast(`Controller getrennt: ${describeGamepad(gamepad)}`);
       document.body.classList.remove('is-gamepad-mode');
-      controllerSetupUI?.syncConnectedControllers?.();
-      if (controllerSetupUI?.isOpen) controllerSetupUI.render();
     },
     onNavigate: (direction) => {
-      if (controllerSetupUI?.isOpen && controllerSetupUI.handleGamepadNavigate?.(direction)) {
-        return;
-      }
       moveFocus(direction);
     },
     onAction: (action) => {
@@ -854,16 +936,12 @@ function setupBrowserGamepadInput() {
     },
     onInputModeChange: (mode) => {
       document.body.classList.toggle('is-gamepad-mode', mode === 'gamepad');
+      window.FelixelFocusManager?.refresh();
     },
   });
 
   gamepadManager.start();
   window.felixelGamepadManager = gamepadManager;
-
-  if (controllerSetupUI) {
-    controllerSetupUI.gamepadManager = gamepadManager;
-    controllerSetupUI.gamepadManager.applySetupConfig(controllerSetupUI.getConfig(), { silent: true });
-  }
 
   gamepadHintTimer = setTimeout(() => {
     const gamepads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : [];
@@ -877,12 +955,10 @@ function rememberNativeController(controller) {
   if (!controller?.id) return;
   const entry = { ...controller, source: controller.source || 'sdl' };
   nativeControllers.set(controller.id, entry);
-  controllerSetupUI?.registerNativeController?.(entry);
 }
 
 function forgetNativeController(controllerId) {
   nativeControllers.delete(controllerId);
-  controllerSetupUI?.unregisterNativeController?.(controllerId);
   if (nativeControllers.size === 0) {
     nativeAxisDirections.clear();
     document.body.classList.remove('is-gamepad-mode');
@@ -897,12 +973,13 @@ function handleNativeControllerInput(payload) {
   if (!payload?.type) return;
 
   if (payload.type === 'connect') {
+    lastControllerConnectAt = performance.now();
     rememberNativeController(payload);
     console.info(`[Controller] Verbunden: ${describeNativeController(payload)}`);
     showToast(`Controller verbunden: ${describeNativeController(payload)}`);
     hideGamepadHint();
     document.body.classList.add('is-gamepad-mode');
-    if (controllerSetupUI?.isOpen) controllerSetupUI.render();
+    window.FelixelFocusManager?.ensureShelfFocus();
     return;
   }
 
@@ -910,7 +987,6 @@ function handleNativeControllerInput(payload) {
     console.info(`[Controller] Getrennt: ${describeNativeController(payload)}`);
     showToast(`Controller getrennt: ${describeNativeController(payload)}`);
     forgetNativeController(payload.id);
-    if (controllerSetupUI?.isOpen) controllerSetupUI.render();
     return;
   }
 
@@ -957,7 +1033,7 @@ function handleNativeAxis(payload) {
   const axis = payload.logicalAxis || payload.axis;
   if (!axis) return;
 
-  const deadzone = controllerSetupUI?.getConfig?.().global?.deadzone ?? 0.35;
+  const deadzone = window.GamepadUtils?.loadControllerSetupConfig?.().global?.deadzone ?? 0.35;
   const value = Number(payload.value) || 0;
   let direction = null;
 
@@ -980,9 +1056,6 @@ function handleNativeAxis(payload) {
 
 function emitNativeNavigation(direction) {
   document.body.classList.add('is-gamepad-mode');
-  if (controllerSetupUI?.isOpen && controllerSetupUI.handleGamepadNavigate?.(direction)) {
-    return;
-  }
   moveFocus(direction);
 }
 
@@ -1028,25 +1101,34 @@ function describeGamepad(gamepad) {
 }
 
 function handleGamepadAction(action) {
-  if (controllerSetupUI?.isOpen && controllerSetupUI.handleGamepadAction?.(action)) {
+  if (controllerSetupActive()) {
+    const sinceConnect = performance.now() - lastControllerConnectAt;
+    if (action === 'back' && sinceConnect > CONTROLLER_SETUP_CLOSE_GRACE_MS) {
+      window.closeControllerSetup();
+      return;
+    }
+    if (action === 'confirm') {
+      window.FelixelFocusManager?.confirm();
+      return;
+    }
     return;
   }
 
   switch (action) {
     case 'confirm':
-      launchFocusedGame();
+      window.FelixelFocusManager?.confirm();
       break;
     case 'back':
       handleBackAction();
       break;
     case 'settings':
-      openSettings();
+      window.openControllerSetup?.();
       break;
     case 'tabLeft':
-      navigateTab('left');
+      window.FelixelFocusManager?.switchTab('left');
       break;
     case 'tabRight':
-      navigateTab('right');
+      window.FelixelFocusManager?.switchTab('right');
       break;
     default:
       break;
@@ -1057,31 +1139,8 @@ function handleGamepadAction(action) {
 
 const NAVIGABLE_TABS = ['recent', 'switch', 'wii'];
 
-function navigateTab(direction) {
-  const idx = NAVIGABLE_TABS.indexOf(currentCategory);
-  const currentIdx = idx === -1 ? 0 : idx;
-
-  const nextIdx = direction === 'left'
-    ? (currentIdx - 1 + NAVIGABLE_TABS.length) % NAVIGABLE_TABS.length
-    : (currentIdx + 1) % NAVIGABLE_TABS.length;
-
-  const nextCategory = NAVIGABLE_TABS[nextIdx];
-  document.querySelector(`.ps5-category[data-category="${nextCategory}"]`)?.click();
-}
-
 function moveFocus(direction) {
-  if (focusedGames.length === 0) return;
-
-  let delta = 0;
-  if (direction === 'left') delta = -1;
-  else if (direction === 'right') delta = 1;
-  else return;
-
-  const nextIndex = Math.max(0, Math.min(focusedGames.length - 1, currentIndex + delta));
-  if (nextIndex !== currentIndex) {
-    setFocusedGameByIndex(nextIndex);
-    document.querySelector('.game-card.active')?.focus({ preventScroll: true });
-  }
+  window.FelixelFocusManager?.navigate(direction);
 }
 
 function launchFocusedGame() {
@@ -1097,14 +1156,17 @@ function launchGameById(gameId) {
 }
 
 function handleBackAction() {
-  if (controllerSetupUI?.isOpen) {
-    controllerSetupUI.handleClose();
+  if (controllerSetupActive()) {
+    const sinceConnect = performance.now() - lastControllerConnectAt;
+    if (sinceConnect > CONTROLLER_SETUP_CLOSE_GRACE_MS) {
+      window.closeControllerSetup();
+    }
     return;
   }
 
-  const controllerOverlay = document.getElementById('controllerOverlay');
-  if (!controllerOverlay?.classList.contains('hidden')) {
-    controllerOverlay.classList.add('hidden');
+  const focusZone = window.FelixelFocusManager?.getZone();
+  if (focusZone === 'topbar' || focusZone === 'categories') {
+    window.FelixelFocusManager?.setZone('shelf');
     return;
   }
 
@@ -1115,7 +1177,7 @@ function handleBackAction() {
 }
 
 function openSettings() {
-  showToast('Einstellungen kommen bald.');
+  window.openControllerSetup?.();
 }
 
 function showGamepadHint() {
