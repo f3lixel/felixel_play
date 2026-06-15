@@ -21,30 +21,12 @@
 
   <!-- PS5-Style Top Bar -->
   <header class="ps5-topbar">
-    <!-- Row 1: Profil + Social links | Datum + Controller + Uhr rechts -->
+    <!-- Row 1: Profil | Datum + Controller + Uhr rechts -->
     <div class="ps5-topbar-row1">
       <div class="ps5-topbar-left">
         <div class="ps5-avatar-wrapper">
           <img src="assets/icons/felixel-logo.svg" class="ps5-avatar" alt="felixel play">
           <span class="ps5-avatar-badge">+</span>
-        </div>
-        <div class="ps5-social">
-          <div class="ps5-social-item">
-            <button class="ps5-social-btn" type="button" aria-label="Freunde">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
-              </svg>
-            </button>
-            <span class="ps5-social-count">5</span>
-          </div>
-          <div class="ps5-social-item">
-            <button class="ps5-social-btn" type="button" aria-label="Nachrichten">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
-              </svg>
-            </button>
-            <span class="ps5-social-count">12</span>
-          </div>
         </div>
       </div>
       <div class="ps5-topbar-right">
@@ -128,10 +110,11 @@
       <button class="ps5-category ps5-category--soon" data-category="playstation">PlayStation</button>
       <button class="ps5-category ps5-category--soon" data-category="ds">Nintendo DS</button>
     </nav>
-    <div class="game-shelf" id="gameShelf" role="listbox" aria-label="Spielauswahl mit Tastatur- und Controller-Fokus"></div>
-    <div class="start-prompt" id="startPrompt">
-      Press <span class="x-btn-circle">&#x2715;</span> to start
+    <div class="dashboard-view-indicator" id="dashboardViewIndicator" data-view="shelf" aria-live="polite" title="Ansicht: Reihe (Touchpad zum Wechseln)">
+      <span class="dashboard-view-indicator__label">Reihe</span>
     </div>
+    <div class="game-shelf" id="gameShelf" role="listbox" aria-label="Spielauswahl mit Tastatur- und Controller-Fokus"></div>
+    <div class="start-prompt" id="startPrompt"></div>
   </main>
 
   <!-- Toast -->
@@ -170,7 +153,7 @@
 
       <footer class="controller-modal__footer">
         <button class="controller-modal__close-btn" type="button" data-controller-close>
-          <span class="controller-modal__close-icon" aria-hidden="true"></span>
+          <span class="controller-modal__close-icon" data-controller-icon="circle" data-controller-icon-class="ctrl-btn-icon ctrl-btn-icon--close" aria-hidden="true"></span>
           <span>schließen</span>
         </button>
       </footer>
@@ -187,10 +170,7 @@
         <button class="overlay-action" type="button" data-action="settings">Einstellungen</button>
         <button class="overlay-action" type="button" data-action="quit">Beenden</button>
       </nav>
-      <p class="game-overlay-hint">
-        <span>↑ ↓ Navigieren</span>
-        <span>✕ Bestätigen</span>
-      </p>
+      <p class="game-overlay-hint" id="gameOverlayHint"></p>
     </div>
   </div>
 
@@ -215,6 +195,7 @@
   </div>
 
   <script src="node_modules/gsap/dist/gsap.min.js"></script>
+  <script src="ControllerButtonIcons.js"></script>
   <script src="GamepadManager.js"></script>
   <script src="FocusManager.js"></script>
   <script src="ControllerSetupUI.js"></script>

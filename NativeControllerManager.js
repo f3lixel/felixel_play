@@ -61,7 +61,14 @@ const PLAYSTATION_BUTTON_LABELS = {
   rightShoulder: 'R1',
   leftTrigger: 'L2',
   rightTrigger: 'R2',
+  misc1: 'Touchpad',
+  touchpad: 'Touchpad',
 };
+
+// SDL mappt den PS4/PS5-Touchpad-Klick oft als Raw-Joystick-Button 13 (misc1),
+// aber @kmamal/sdl liefert dafür kein Controller-Button-Event.
+const PLAYSTATION_TOUCHPAD_RAW_BUTTONS = [13, 14];
+const TOUCHPAD_POLL_MS = 16;
 
 function toHexId(value) {
   if (typeof value !== 'number') return '';
@@ -294,6 +301,7 @@ class NativeControllerManager extends EventEmitter {
 
     this.controllers.set(key, entry);
     this.attachInstanceEvents(entry);
+    this.attachPlayStationTouchpad(entry);
     this.startKeepAlive(entry);
     this.pulseConnectRumble(entry);
     this.emitInput(this.buildBaseEvent(entry, 'connect'));
@@ -360,8 +368,69 @@ class NativeControllerManager extends EventEmitter {
     });
   }
 
+  attachPlayStationTouchpad(entry) {
+    if (entry.info.controllerFamily !== 'playstation' || !this.sdl?.joystick?.openDevice) {
+      return;
+    }
+
+    const joystickDevice = (this.sdl.joystick.devices || []).find(
+      (device) => device.id === entry.device.id || getDeviceKey(device) === entry.key,
+    );
+    if (!joystickDevice) return;
+
+    let joystick;
+    try {
+      joystick = this.sdl.joystick.openDevice(joystickDevice);
+    } catch (err) {
+      console.warn(`[Controller] Touchpad-Joystick konnte nicht geoeffnet werden (${entry.info.name}): ${err.message}`);
+      return;
+    }
+
+    entry.touchpadJoystick = joystick;
+    entry.touchpadPressed = false;
+
+    const emitTouchpad = (pressed) => {
+      if (pressed === entry.touchpadPressed) return;
+      entry.touchpadPressed = pressed;
+      if (pressed) {
+        this.emitInput(this.buildButtonEvent(entry, 'button-down', 'touchpad'));
+      }
+    };
+
+    const handleRawButton = (event, pressed) => {
+      const button = typeof event?.button === 'number' ? event.button : Number(event);
+      if (!Number.isInteger(button)) return;
+      if (!PLAYSTATION_TOUCHPAD_RAW_BUTTONS.includes(button)) return;
+      emitTouchpad(pressed);
+    };
+
+    joystick.on('buttonDown', (event) => handleRawButton(event, true));
+    joystick.on('buttonUp', (event) => handleRawButton(event, false));
+
+    entry.touchpadPollTimer = setInterval(() => {
+      if (joystick.closed) return;
+      const buttons = joystick.buttons || [];
+      const pressed = PLAYSTATION_TOUCHPAD_RAW_BUTTONS.some((index) => Boolean(buttons[index]));
+      emitTouchpad(pressed);
+    }, TOUCHPAD_POLL_MS);
+  }
+
   closeController(entry, options = {}) {
     const { emitDisconnect = true, alreadyClosed = false } = options;
+    if (entry.touchpadPollTimer) {
+      clearInterval(entry.touchpadPollTimer);
+      entry.touchpadPollTimer = null;
+    }
+
+    if (entry.touchpadJoystick && !entry.touchpadJoystick.closed) {
+      try {
+        entry.touchpadJoystick.close();
+      } catch (err) {
+        console.warn(`[Controller] Touchpad-Joystick konnte nicht geschlossen werden (${entry.info.name}): ${err.message}`);
+      }
+    }
+    entry.touchpadJoystick = null;
+
     if (entry.keepAliveTimer) {
       clearInterval(entry.keepAliveTimer);
       entry.keepAliveTimer = null;

@@ -43,13 +43,11 @@
         <button class="overlay-action" data-action="quit">Beenden</button>
       </nav>
 
-      <p class="game-overlay-hint">
-        <span>↑ ↓ Navigieren</span>
-        <span>✕ Bestätigen</span>
-      </p>
+      <p class="game-overlay-hint" id="overlayHint"></p>
     </div>
   </div>
 
+  <script src="ControllerButtonIcons.js"></script>
   <script>
     const ACTIONS = ['resume', 'settings', 'quit'];
     let focusIdx = 0;
@@ -58,6 +56,12 @@
     let rafId = null;
 
     const btns = Array.from(document.querySelectorAll('.overlay-action'));
+
+    const overlayHint = document.getElementById('overlayHint');
+    if (overlayHint && window.ControllerButtonIcons?.overlayNavigationHint) {
+      overlayHint.innerHTML = window.ControllerButtonIcons.overlayNavigationHint();
+    }
+    window.ControllerButtonIcons?.applyDataIcons?.();
 
     function resetState() {
       focusIdx = 0;

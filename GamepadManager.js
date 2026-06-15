@@ -9,6 +9,7 @@ const STANDARD_MAPPING = {
   r1: 5,        // R1 / RB / R (Tab rechts)
   settings: 9,  // Options / Start / +
   share: 8,     // Share / Back / -
+  touchpad: 17, // Touchpad-Klick (DualSense / DualShock 4)
   dpadUp: 12,
   dpadDown: 13,
   dpadLeft: 14,
@@ -440,6 +441,7 @@ class GamepadManager {
     this.pollAction(gamepad, 'settings', this.mapping.settings);
     this.pollAction(gamepad, 'tabLeft', this.mapping.l1);
     this.pollAction(gamepad, 'tabRight', this.mapping.r1);
+    this.pollTouchpad(gamepad);
   }
 
   pollNavigation(gamepad) {
@@ -505,6 +507,23 @@ class GamepadManager {
     }
 
     this.buttonPressed.set(action, pressed);
+  }
+
+  pollTouchpad(gamepad) {
+    const info = parseControllerInfo(gamepad);
+    const indices = info.type === 'dualsense' || info.type === 'dualshock4'
+      ? [this.mapping.touchpad, 13, 20]
+      : [this.mapping.touchpad];
+
+    const pressed = indices.some((index) => this.isButtonPressed(gamepad, index));
+    const wasPressed = this.buttonPressed.get('touchpad') || false;
+
+    if (pressed && !wasPressed && this.canEmit('touchpad', this.buttonDebounce)) {
+      this.setInputMode('gamepad');
+      this.callbacks.onAction('touchpad');
+    }
+
+    this.buttonPressed.set('touchpad', pressed);
   }
 
   canEmit(key, debounceMs) {

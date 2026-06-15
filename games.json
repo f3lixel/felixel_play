@@ -175,5 +175,23 @@
     "coverArt": "assets/covers/Super_Mario_Party_Jamboree_Wallpaper_1080x1920.webp",
     "heroArt": "assets/covers/super_mario_party_jamboree.jpg",
     "backgroundMusic": ""
+  },
+  {
+    "id": "20",
+    "title": "Super Mario Maker 2",
+    "platform": "Switch",
+    "romPath": "roms/switch/SUPER MARIO MAKER 2 [01009B90006DC800][v393216].nsp",
+    "coverArt": "assets/covers/mario maker 2 hochformat.webp",
+    "heroArt": "assets/covers/mario maker 2.jpg",
+    "backgroundMusic": ""
+  },
+  {
+    "id": "21",
+    "title": "Splatoon 2",
+    "platform": "Switch",
+    "romPath": "roms/switch/Splatoon 2 Eur.xci",
+    "coverArt": "assets/covers/splatoon 2 hoch.jpg",
+    "heroArt": "assets/covers/splatoon2.jpg",
+    "backgroundMusic": ""
   }
 ]

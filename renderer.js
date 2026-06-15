@@ -34,6 +34,10 @@ let gamepadHintTimer = null;
 let focusSelectionTimer = null;
 let nativeControllerUnsubscribe = null;
 let nativeControllerAvailable = false;
+let touchpadPollFrame = null;
+let lastTouchpadActionAt = 0;
+const touchpadPressedByGamepad = new Map();
+const TOUCHPAD_ACTION_DEBOUNCE_MS = 400;
 const nativeControllers = new Map();
 const nativeAxisDirections = new Map();
 
@@ -52,6 +56,125 @@ const RECENT_GAMES_KEY = 'felixel:recent-games';
 
 let currentCategory = 'recent';
 
+const DASHBOARD_VIEWS = ['shelf', 'masonry'];
+const DASHBOARD_VIEW_KEY = 'felixel:dashboard-view';
+const DASHBOARD_VIEW_LABELS = {
+  shelf: 'Reihe',
+  masonry: 'Masonry',
+};
+
+let currentDashboardView = loadDashboardView();
+
+function loadDashboardView() {
+  try {
+    const saved = localStorage.getItem(DASHBOARD_VIEW_KEY);
+    return DASHBOARD_VIEWS.includes(saved) ? saved : 'shelf';
+  } catch {
+    return 'shelf';
+  }
+}
+
+function saveDashboardView() {
+  try {
+    localStorage.setItem(DASHBOARD_VIEW_KEY, currentDashboardView);
+  } catch {
+    // Speichern ist optional.
+  }
+}
+
+function isMasonryView() {
+  return currentDashboardView === 'masonry';
+}
+
+function applyDashboardView() {
+  const shelf = document.getElementById('gameShelf');
+  const container = document.getElementById('shelfContainer');
+  if (!shelf) return;
+
+  shelf.classList.toggle('is-masonry', isMasonryView());
+  shelf.classList.toggle('is-shelf', !isMasonryView());
+  container?.classList.toggle('is-masonry-view', isMasonryView());
+  updateDashboardViewIndicator();
+}
+
+function updateDashboardViewIndicator() {
+  const indicator = document.getElementById('dashboardViewIndicator');
+  if (!indicator) return;
+
+  const label = DASHBOARD_VIEW_LABELS[currentDashboardView] || currentDashboardView;
+  indicator.dataset.view = currentDashboardView;
+  indicator.setAttribute('aria-label', `Ansicht: ${label}`);
+  indicator.title = `Ansicht: ${label} (Touchpad zum Wechseln)`;
+
+  const text = indicator.querySelector('.dashboard-view-indicator__label');
+  if (text) text.textContent = label;
+}
+
+function canEmitTouchpadAction() {
+  const now = performance.now();
+  if (now - lastTouchpadActionAt < TOUCHPAD_ACTION_DEBOUNCE_MS) return false;
+  lastTouchpadActionAt = now;
+  return true;
+}
+
+function isTouchpadPressedOnGamepad(gamepad) {
+  if (!gamepad?.buttons?.length) return false;
+
+  const info = window.GamepadUtils?.parseControllerInfo?.(gamepad);
+  const indices = info?.type === 'dualsense' || info?.type === 'dualshock4'
+    ? [17, 13, 20]
+    : [17];
+
+  return indices.some((index) => {
+    const button = gamepad.buttons[index];
+    if (!button) return false;
+    if (typeof button === 'number') return button > 0.5;
+    return Boolean(button.pressed) || (button.value || 0) > 0.5;
+  });
+}
+
+function setupTouchpadInput() {
+  if (!navigator.getGamepads || touchpadPollFrame !== null) return;
+
+  const poll = () => {
+    if (!controllerSetupActive()) {
+      const gamepads = window.GamepadUtils?.getAllRealGamepads?.()
+        || Array.from(navigator.getGamepads()).filter(Boolean);
+
+      for (const gamepad of gamepads) {
+        const pressed = isTouchpadPressedOnGamepad(gamepad);
+        const wasPressed = touchpadPressedByGamepad.get(gamepad.index) || false;
+
+        if (pressed && !wasPressed && canEmitTouchpadAction()) {
+          document.body.classList.add('is-gamepad-mode');
+          cycleDashboardView();
+        }
+
+        touchpadPressedByGamepad.set(gamepad.index, pressed);
+      }
+    }
+
+    touchpadPollFrame = requestAnimationFrame(poll);
+  };
+
+  touchpadPollFrame = requestAnimationFrame(poll);
+}
+
+function cycleDashboardView() {
+  const current = DASHBOARD_VIEWS.indexOf(currentDashboardView);
+  currentDashboardView = DASHBOARD_VIEWS[(current + 1) % DASHBOARD_VIEWS.length];
+  saveDashboardView();
+  applyDashboardView();
+  window.FelixelFocusManager?.refresh();
+
+  if (currentIndex >= 0) {
+    setFocusedGameByIndex(currentIndex, { scroll: true, playSound: false, updateHero: false });
+  }
+
+  playHoverSound();
+  showToast(`Ansicht: ${DASHBOARD_VIEW_LABELS[currentDashboardView]}`);
+}
+
 // ===== INIT =====
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -62,7 +185,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupInGameOverlay();
   setupTopBarControls();
   setupCategoryTabs();
+  applyDashboardView();
   startClock();
+  setupMasonryResize();
   startDate();
   updateWifi();
   window.addEventListener('online', updateWifi);
@@ -225,6 +350,7 @@ function renderShelf(animate = false) {
 
   const doRender = () => {
     shelf.innerHTML = '';
+    applyDashboardView();
 
     const sorted = getSortedGames();
     focusedGames = sorted;
@@ -248,8 +374,12 @@ function renderShelf(animate = false) {
     }
 
     const fragment = document.createDocumentFragment();
-    for (const [index, game] of sorted.entries()) {
-      fragment.appendChild(createShelfCard(game, index));
+    if (isMasonryView()) {
+      fragment.appendChild(buildMasonryGrid(sorted));
+    } else {
+      for (const [index, game] of sorted.entries()) {
+        fragment.appendChild(createShelfCard(game, index));
+      }
     }
     shelf.appendChild(fragment);
 
@@ -322,11 +452,89 @@ function getSortedGames() {
   });
 }
 
+// ===== MASONRY LAYOUT =====
+
+const MASONRY_TIER_WEIGHTS = {
+  'masonry-card--short': 9,
+  'masonry-card--medium': 14,
+  'masonry-card--tall': 20,
+  'masonry-card--xl': 26,
+};
+
+const MASONRY_TIERS = [
+  'masonry-card--short',
+  'masonry-card--medium',
+  'masonry-card--tall',
+  'masonry-card--xl',
+  'masonry-card--medium',
+  'masonry-card--short',
+];
+
+let masonryResizeTimer = null;
+
+function getMasonryTier(index) {
+  return MASONRY_TIERS[index % MASONRY_TIERS.length];
+}
+
+function getMasonryColumnCount() {
+  const width = window.innerWidth;
+  if (width >= 1600) return 6;
+  if (width >= 1280) return 5;
+  if (width >= 1024) return 4;
+  if (width >= 768) return 3;
+  return 2;
+}
+
+function estimateMasonryCardHeight(index) {
+  const tier = getMasonryTier(index);
+  return MASONRY_TIER_WEIGHTS[tier] || 14;
+}
+
+function buildMasonryGrid(games) {
+  const grid = document.createElement('div');
+  grid.className = 'masonry-grid';
+  grid.setAttribute('role', 'presentation');
+
+  const columnCount = getMasonryColumnCount();
+  const columns = Array.from({ length: columnCount }, () => {
+    const column = document.createElement('div');
+    column.className = 'masonry-column';
+    column.setAttribute('role', 'group');
+    grid.appendChild(column);
+    return column;
+  });
+
+  const columnHeights = Array(columnCount).fill(0);
+
+  for (const [index, game] of games.entries()) {
+    const card = createShelfCard(game, index);
+    const targetColumn = columnHeights.indexOf(Math.min(...columnHeights));
+    columns[targetColumn].appendChild(card);
+    columnHeights[targetColumn] += estimateMasonryCardHeight(index);
+  }
+
+  return grid;
+}
+
+function setupMasonryResize() {
+  window.addEventListener('resize', () => {
+    if (!isMasonryView()) return;
+    clearTimeout(masonryResizeTimer);
+    masonryResizeTimer = setTimeout(() => {
+      masonryResizeTimer = null;
+      if (focusedGames.length > 0) {
+        renderShelf();
+      }
+    }, 180);
+  });
+}
+
 // ===== SHELF CARD =====
 
 function createShelfCard(game, index) {
   const card = document.createElement('div');
-  card.className = 'shelf-card game-card';
+  const masonryTier = isMasonryView() ? getMasonryTier(index) : '';
+  card.className = `shelf-card game-card${masonryTier ? ` ${masonryTier}` : ''}`;
   card.dataset.gameId = game.id;
   card.tabIndex = 0;
   card.setAttribute('role', 'option');
@@ -418,7 +626,11 @@ function setFocusedGameByIndex(index, options = {}) {
   }
 
   if (scroll) {
-    card.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+    card.scrollIntoView({
+      behavior: 'auto',
+      block: isMasonryView() ? 'nearest' : 'nearest',
+      inline: isMasonryView() ? 'nearest' : 'nearest',
+    });
   }
 
   if (playSound) {
@@ -458,6 +670,11 @@ function setupKeyboardNavigation() {
         e.preventDefault();
         handleBackAction();
         break;
+      case 'v':
+      case 'V':
+        e.preventDefault();
+        cycleDashboardView();
+        break;
       default:
         break;
     }
@@ -472,6 +689,7 @@ function setupFocusManager() {
   window.FelixelFocusManager.init({
     isModalOpen: controllerSetupActive,
     getCategoryIndex: () => NAVIGABLE_TABS.indexOf(currentCategory),
+    getDashboardView: () => currentDashboardView,
     getShelfCount: () => focusedGames.length,
     hasShelfFocus: () => currentIndex >= 0,
     onShelfMove: handleShelfMove,
@@ -491,17 +709,92 @@ function handleShelfMove(direction) {
       setFocusedGameByIndex(0, { scroll: true, playSound: false });
     }
     document.querySelector('.shelf-card.is-focused')?.focus({ preventScroll: true });
-    return;
+    return true;
   }
 
-  if (focusedGames.length === 0) return;
+  if (focusedGames.length === 0) return false;
 
-  const delta = direction === 'left' ? -1 : 1;
-  const nextIndex = Math.max(0, Math.min(focusedGames.length - 1, currentIndex + delta));
+  let nextIndex = currentIndex;
+
+  if (isMasonryView()) {
+    nextIndex = findSpatialShelfIndex(direction);
+    if (nextIndex < 0) return false;
+  } else if (direction === 'left' || direction === 'right') {
+    const delta = direction === 'left' ? -1 : 1;
+    nextIndex = Math.max(0, Math.min(focusedGames.length - 1, currentIndex + delta));
+  } else {
+    return false;
+  }
+
   if (nextIndex !== currentIndex) {
     setFocusedGameByIndex(nextIndex);
     document.querySelector('.shelf-card.is-focused')?.focus({ preventScroll: true });
+    return true;
   }
+
+  return false;
+}
+
+function findSpatialShelfIndex(direction) {
+  const cards = Array.from(document.querySelectorAll('.shelf-card'));
+  if (cards.length === 0) return -1;
+
+  const currentCard = cards.find((card) => card.classList.contains('is-focused'))
+    || cards[currentIndex]
+    || cards[0];
+  if (!currentCard) return -1;
+
+  const currentRect = currentCard.getBoundingClientRect();
+  const cx = currentRect.left + currentRect.width / 2;
+  const cy = currentRect.top + currentRect.height / 2;
+  const edgePadding = 12;
+
+  let bestCard = null;
+  let bestScore = Infinity;
+
+  for (const card of cards) {
+    if (card === currentCard) continue;
+
+    const rect = card.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+
+    let inDirection = false;
+    switch (direction) {
+      case 'left':
+        inDirection = x < cx - edgePadding;
+        break;
+      case 'right':
+        inDirection = x > cx + edgePadding;
+        break;
+      case 'up':
+        inDirection = y < cy - edgePadding;
+        break;
+      case 'down':
+        inDirection = y > cy + edgePadding;
+        break;
+      default:
+        break;
+    }
+    if (!inDirection) continue;
+
+    const primary = direction === 'left' || direction === 'right'
+      ? Math.abs(x - cx)
+      : Math.abs(y - cy);
+    const secondary = direction === 'left' || direction === 'right'
+      ? Math.abs(y - cy)
+      : Math.abs(x - cx);
+    const score = primary + secondary * 0.35;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestCard = card;
+    }
+  }
+
+  if (!bestCard) return currentIndex;
+  const nextIndex = focusedGames.findIndex((game) => game.id === bestCard.dataset.gameId);
+  return nextIndex >= 0 ? nextIndex : currentIndex;
 }
 
 function handleTopBarAction(buttonId) {
@@ -525,11 +818,11 @@ function updateGamepadHint(text) {
   if (!prompt) return;
 
   if (!document.body.classList.contains('is-gamepad-mode')) {
-    prompt.innerHTML = 'Press <span class="x-btn-circle">&#x2715;</span> to start';
+    prompt.innerHTML = window.ControllerButtonIcons?.startPromptHtml?.() || 'Press to start';
     return;
   }
 
-  prompt.textContent = text || 'Press ✕ to start';
+  prompt.innerHTML = text || window.ControllerButtonIcons?.startPromptHtml?.() || 'Press to start';
 }
 
 // ===== TOP BAR CONTROLS =====
@@ -541,9 +834,6 @@ function setupTopBarControls() {
   document.getElementById('btnCalendar')?.addEventListener('click', () => showToast('Kalender folgt bald.'));
   document.getElementById('btnTrophies')?.addEventListener('click', () => showToast('Trophäen folgen bald.'));
   document.getElementById('btnSwitch')?.addEventListener('click', () => showToast('Wechseln folgt bald.'));
-  document.querySelectorAll('.ps5-social-btn').forEach(btn => {
-    btn.addEventListener('click', () => showToast('Social-Funktion folgt bald.'));
-  });
 }
 
 // ===== CATEGORY TABS =====
@@ -855,6 +1145,8 @@ function setupLauncherEvents() {
 // ===== GAMEPAD UI BRIDGE =====
 
 function setupGamepadInput() {
+  setupTouchpadInput();
+
   if (setupNativeControllerInput()) {
     return;
   }
@@ -1086,6 +1378,10 @@ function nativeButtonToAction(button) {
       return 'tabLeft';
     case 'rightShoulder':
       return 'tabRight';
+    case 'misc1':
+    case 'misc2':
+    case 'touchpad':
+      return 'touchpad';
     default:
       return null;
   }
@@ -1129,6 +1425,11 @@ function handleGamepadAction(action) {
       break;
     case 'tabRight':
       window.FelixelFocusManager?.switchTab('right');
+      break;
+    case 'touchpad':
+      if (canEmitTouchpadAction()) {
+        cycleDashboardView();
+      }
       break;
     default:
       break;

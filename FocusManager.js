@@ -14,12 +14,18 @@
 
   const MODAL_SIDEBAR_VIEWS = ['dashboard', 'connect'];
 
-  const HINTS = {
-    [ZONES.TOPBAR]: '✕ Öffnen  ·  ↓ Kategorien',
-    [ZONES.CATEGORIES]: '↑ System  ·  ↓ Spiele  ·  ✕ Auswählen  ·  L1/R1 Wechseln',
-    [ZONES.SHELF]: '✕ Starten  ·  ↑ Kategorien  ·  L1/R1 Wechseln',
-    [ZONES.MODAL]: '↑↓ Navigieren  ·  ✕ Auswählen  ·  ○ Schließen',
+  const ZONE_HINT_KEYS = {
+    [ZONES.TOPBAR]: 'topbar',
+    [ZONES.CATEGORIES]: 'categories',
+    [ZONES.SHELF]: 'shelf',
+    [ZONES.MODAL]: 'modal',
   };
+
+  function getZoneHint(zoneKey) {
+    const hints = window.ControllerButtonIcons?.focusHints?.(callbacks.getDashboardView?.());
+    const hintKey = ZONE_HINT_KEYS[zoneKey];
+    return hints?.[hintKey] || '';
+  }
 
   let zone = ZONES.SHELF;
   let topbarIndex = 1;
@@ -37,6 +43,7 @@
     onHintChange: null,
     isModalOpen: () => false,
     getCategoryIndex: () => 0,
+    getDashboardView: () => 'shelf',
     getShelfCount: () => 0,
     hasShelfFocus: () => false,
   };
@@ -84,7 +91,7 @@
       }
     }
 
-    callbacks.onHintChange?.(HINTS[zone] || '');
+    callbacks.onHintChange?.(getZoneHint(zone));
   }
 
   function playSound() {
@@ -122,6 +129,22 @@
   }
 
   function moveVertical(delta) {
+    if (zone === ZONES.SHELF && callbacks.getDashboardView?.() === 'masonry') {
+      const direction = delta < 0 ? 'up' : 'down';
+      if (direction === 'up') {
+        const moved = callbacks.onShelfMove?.('up');
+        if (!moved) {
+          zone = ZONES.CATEGORIES;
+          syncCategoryIndex();
+          playSound();
+          updateVisuals();
+        }
+      } else {
+        callbacks.onShelfMove?.('down');
+      }
+      return;
+    }
+
     if (zone === ZONES.SHELF && delta < 0) {
       zone = ZONES.CATEGORIES;
       syncCategoryIndex();
