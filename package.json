@@ -12,12 +12,12 @@
     "start": "npm run tw:build && electron ."
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.2.0",
     "@tailwindcss/cli": "^4.3.0",
     "autoprefixer": "^10.5.0",
     "electron": "^41.2.2",
     "node-addon-api": "^8.8.0",
-    "node-gyp": "^11.5.0",
+    "node-gyp": "^13.0.1",
     "postcss": "^8.5.14",
     "tailwindcss": "^4.3.0"
   },
